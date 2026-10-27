@@ -1,12 +1,16 @@
-/** Spectra mark: a prism splitting one beam into three. */
+/**
+ * Spectra mark: an aperture. A ring split into three bands around a fixed
+ * point — a lens that watches, and light broken into its components.
+ */
 export function Logo({ size = 20 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden className="logo-mark">
-      <path d="M1 12.5 H8.2" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M12 3.5 L20.5 19.5 H3.5 Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="miter" />
-      <path d="M15.2 11.2 L23 7.5" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M15.8 12.6 L23 12.6" stroke="var(--active)" strokeWidth="1.5" />
-      <path d="M16.4 14 L23 17.7" stroke="currentColor" strokeWidth="1.5" />
+      <g strokeWidth="2.4" strokeLinecap="butt">
+        <path d="M13.56 3.14 A9 9 0 0 1 20.46 15.08" stroke="var(--active)" />
+        <path d="M18.89 17.79 A9 9 0 0 1 5.11 17.79" stroke="currentColor" />
+        <path d="M3.54 15.08 A9 9 0 0 1 10.44 3.14" stroke="currentColor" />
+      </g>
+      <circle cx="12" cy="12" r="2.6" fill="currentColor" />
     </svg>
   );
 }

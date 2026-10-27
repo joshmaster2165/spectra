@@ -43,6 +43,7 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".json": "application/json",
+  ".woff2": "font/woff2",
 };
 
 /**

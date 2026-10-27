@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" alt="Spectra" width="360"></p>
+
 # Spectra
 
 **A live, read-only dashboard for watching a Claude Code agent work.** Spectra turns the agent's terminal stream into a local dashboard showing:

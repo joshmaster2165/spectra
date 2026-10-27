@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" fill="none" role="img" aria-label="Spectra">
+  <rect width="360" height="72" rx="10" fill="#08090b"/>
+  <g transform="translate(20 12) scale(2)" fill="none">
+    <g stroke-width="2.4">
+      <path d="M13.56 3.14 A9 9 0 0 1 20.46 15.08" stroke="#e8a13a"/>
+      <path d="M18.89 17.79 A9 9 0 0 1 5.11 17.79" stroke="#f1f3f5"/>
+      <path d="M3.54 15.08 A9 9 0 0 1 10.44 3.14" stroke="#f1f3f5"/>
+    </g>
+    <circle cx="12" cy="12" r="2.6" fill="#f1f3f5"/>
+  </g>
+  <text x="84" y="45" fill="#f1f3f5" font-family="'IBM Plex Sans Condensed','Helvetica Neue',Arial,sans-serif" font-weight="600" font-size="24" letter-spacing="10">SPECTRA</text>
+</svg>
