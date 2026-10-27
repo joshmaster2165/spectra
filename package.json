@@ -1,0 +1,29 @@
+{
+  "name": "spectra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only oversight dashboard for Claude Code: live map, scope boundary, findings and replay.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "npm run build && npm run start --workspace @spectra/server",
+    "dev": "npm run dev --workspace @spectra/server & npm run dev --workspace @spectra/web",
+    "dev:server": "npm run dev --workspace @spectra/server",
+    "dev:web": "npm run dev --workspace @spectra/web",
+    "hooks:install": "node packages/server/bin/install-hooks.mjs",
+    "mcp": "npm run mcp --workspace @spectra/server",
+    "demo": "npm run demo --workspace @spectra/server",
+    "typecheck": "tsc -p packages/server && tsc -p packages/web --noEmit",
+    "build": "npm run build --workspace @spectra/web"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joshmaster2165/spectra.git"
+  }
+}

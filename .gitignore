@@ -1,0 +1,6 @@
+node_modules
+dist
+spectra.config.json
+.claude/
+.DS_Store
+*.log

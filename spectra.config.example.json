@@ -1,0 +1,6 @@
+{
+  "scope": {
+    "paths": ["/absolute/path/to/target-repo"],
+    "hosts": ["example-shop.test"]
+  }
+}
