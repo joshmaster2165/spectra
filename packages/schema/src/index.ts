@@ -93,6 +93,19 @@ export interface ScopeViolation {
   summary: string;
 }
 
+/* ── Audit log ─────────────────────────────────────────── */
+
+/** Result of checking a session's hash-chained audit log. */
+export interface AuditVerification {
+  ok: boolean;
+  events: number;
+  /** Hash of the last line; record it elsewhere to detect a rewritten log. */
+  head?: string;
+  /** First line that failed, 1-based. */
+  badLine?: number;
+  reason?: string;
+}
+
 /* ── Findings ──────────────────────────────────────────── */
 
 export type Severity = "info" | "low" | "medium" | "high" | "critical";

@@ -13,6 +13,7 @@ import { ExplorationSketch } from "./modules/ExplorationSketch.tsx";
 import { Oversight, type OversightTab } from "./modules/Oversight.tsx";
 import { FilesView } from "./modules/FilesView.tsx";
 import { downloadReport } from "./report.ts";
+import { AuditStatus } from "./components/AuditStatus.tsx";
 import { clock } from "./format.ts";
 
 type View = "network" | "hierarchy" | "files" | "node";
@@ -124,7 +125,7 @@ export function App() {
       <footer className="statusbar">
         <span>Hub {location.host}</span>
         <span>Hooks · Observer · MCP</span>
-        <span>Audit log ~/.spectra/sessions</span>
+        <AuditStatus sessionId={replay.active ? replay.sessionId : state.sessionId} />
         <span className="spacer" />
         <span>Last event {last ? clock(last.ts) : "—"}</span>
       </footer>

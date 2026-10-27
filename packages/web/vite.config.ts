@@ -14,6 +14,7 @@ export default defineConfig({
       "/history": HUB,
       "/files": HUB,
       "/review": HUB,
+      "/verify": HUB,
     },
   },
 });

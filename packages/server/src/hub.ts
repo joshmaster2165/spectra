@@ -16,6 +16,7 @@ import {
 } from "@spectra/schema";
 import { Translator } from "./toolmap.ts";
 import { inScope, makeScope, severityOf, type ScopeConfig } from "./scope.ts";
+import { AuditLog } from "./audit.ts";
 
 const HISTORY_LIMIT = 50_000;
 const BODY_LIMIT = 1_000_000;
@@ -53,6 +54,7 @@ const MIME: Record<string, string> = {
  *   GET  /state            current GraphState
  *   GET  /sessions         recorded sessions (audit log)
  *   GET  /history?session  every event for one session, for replay
+ *   GET  /verify?session   check that session's hash-chained audit log
  *   POST /hooks            raw Claude Code hook payload (bin/spectra-hook.mjs)
  *   POST /events           agent/demo annotations (MCP server, demo script)
  *   POST /scope            operator sets the scope { paths, hosts }
@@ -71,7 +73,7 @@ export class Hub {
   private seenToolCalls = new Set<string>();
   private seenToolResults = new Set<string>();
   private sessionCwds = new Map<string, string>();
-  private logs = new Map<string, fs.WriteStream>();
+  private audit?: AuditLog;
   readonly server: http.Server;
 
   constructor(private opts: HubOptions) {
@@ -84,7 +86,7 @@ export class Hub {
       verifyClient: ({ origin }: { origin?: string }) => isLocalOrigin(origin),
     });
     this.wss.on("connection", (ws) => send(ws, { kind: "snapshot", state: this.state }));
-    if (opts.dataDir) fs.mkdirSync(opts.dataDir, { recursive: true, mode: 0o700 });
+    if (opts.dataDir) this.audit = new AuditLog(opts.dataDir);
     if (opts.scope.paths?.length) this.setScope(makeScope(opts.scope, "config"));
   }
 
@@ -257,51 +259,27 @@ export class Hub {
   /* ── Audit log ───────────────────────────────────────── */
 
   private persist(event: SpectraEvent) {
-    if (!this.opts.dataDir) return;
+    if (!this.audit) return;
     if (event.type === "scope.set") {
       // Scope is global; record the change in every open session log.
-      for (const log of this.logs.values()) log.write(JSON.stringify(event) + "\n");
+      for (const id of this.audit.openSessions()) this.audit.append(id, event);
       return;
     }
     if (event.sessionId === "hub") return;
-    let log = this.logs.get(event.sessionId);
-    if (!log) {
-      log = fs.createWriteStream(this.logPath(event.sessionId), { flags: "a", mode: 0o600 });
-      this.logs.set(event.sessionId, log);
-      if (this.state.scope) {
-        log.write(JSON.stringify({ ts: event.ts, sessionId: "hub", source: "hub", type: "scope.set", scope: this.state.scope }) + "\n");
-      }
+    if (!this.audit.isOpen(event.sessionId) && this.state.scope) {
+      // Each log starts with the scope in force, so replay and verification stand alone.
+      this.audit.append(event.sessionId, { ts: event.ts, sessionId: "hub", source: "hub", type: "scope.set", scope: this.state.scope });
     }
-    log.write(JSON.stringify(event) + "\n");
-  }
-
-  private logPath(sessionId: string) {
-    return path.join(this.opts.dataDir!, `${sessionId.replace(/[^\w.-]/g, "_")}.jsonl`);
+    this.audit.append(event.sessionId, event);
   }
 
   private listSessions(): SessionInfo[] {
-    if (!this.opts.dataDir) return [];
-    return fs
-      .readdirSync(this.opts.dataDir)
-      .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => {
-        const stat = fs.statSync(path.join(this.opts.dataDir!, f));
-        return { id: f.slice(0, -6), events: 0, bytes: stat.size, updated: stat.mtimeMs };
-      })
-      .sort((a, b) => b.updated - a.updated);
+    return this.audit?.list() ?? [];
   }
 
   private readSession(id: string): SpectraEvent[] {
-    if (!this.opts.dataDir) return this.history.filter((e) => e.sessionId === id || e.sessionId === "hub");
-    try {
-      return fs
-        .readFileSync(this.logPath(id), "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l));
-    } catch {
-      return [];
-    }
+    if (!this.audit) return this.history.filter((e) => e.sessionId === id || e.sessionId === "hub");
+    return this.audit.read(id);
   }
 
   private serveStatic(pathname: string, res: http.ServerResponse) {
@@ -328,6 +306,11 @@ export class Hub {
       if (url.pathname === "/state") return json(this.state);
       if (url.pathname === "/sessions") return json(this.listSessions());
       if (url.pathname === "/files") return json(this.listScopeFiles());
+      if (url.pathname === "/verify") {
+        const id = url.searchParams.get("session");
+        if (!id || !this.audit) return json({ ok: false, events: 0, reason: this.audit ? "no session given" : "audit log disabled" });
+        return json(this.audit.verify(id));
+      }
       if (url.pathname === "/history") {
         const id = url.searchParams.get("session");
         return json(id ? this.readSession(id) : this.history);

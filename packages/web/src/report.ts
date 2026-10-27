@@ -1,10 +1,11 @@
-import { SEVERITY_RANK, type GraphState, type Severity } from "@spectra/schema";
+import { SEVERITY_RANK, type AuditVerification, type GraphState, type Severity } from "@spectra/schema";
 import { formatTool } from "./format.ts";
+import { fetchVerification } from "./components/AuditStatus.tsx";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 
 /** Markdown summary of a session for the operator's records. */
-export function buildReport(state: GraphState): string {
+export function buildReport(state: GraphState, audit?: AuditVerification): string {
   const findings = Object.values(state.findings).sort(
     (a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || (b.confidence ?? 0) - (a.confidence ?? 0),
   );
@@ -76,12 +77,24 @@ export function buildReport(state: GraphState): string {
   out.push(`## Files edited`, "");
   out.push(edited.length ? edited.map((p) => `- \`${p}\``).join("\n") : "None.", "");
 
+  out.push(`## Audit log`, "");
+  if (audit?.ok && audit.head) {
+    out.push(`The session's hash-chained log verified intact at report time: ${audit.events} events, head hash:`, "");
+    out.push("```", audit.head, "```", "");
+    out.push(`Keep this hash with the report. To confirm later that the log hasn't been rewritten: \`npm run verify -- ${state.sessionId} ${audit.head}\``, "");
+  } else if (audit && !audit.ok) {
+    out.push(`**Verification failed** at line ${audit.badLine ?? "?"}: ${audit.reason}.`, "");
+  } else {
+    out.push("Not verified (audit log unavailable).", "");
+  }
+
   out.push("---", "", "_Findings marked agent-reported are the agent's own claims. Review verdicts are the operator's. Shell-derived targets are pattern-matched and may be incomplete._", "");
   return out.join("\n");
 }
 
-export function downloadReport(state: GraphState) {
-  const blob = new Blob([buildReport(state)], { type: "text/markdown" });
+export async function downloadReport(state: GraphState) {
+  const audit = state.sessionId ? await fetchVerification(state.sessionId) : undefined;
+  const blob = new Blob([buildReport(state, audit)], { type: "text/markdown" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `spectra-report-${(state.sessionId ?? "session").slice(0, 24)}.md`;

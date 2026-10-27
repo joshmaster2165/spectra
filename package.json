@@ -17,7 +17,8 @@
     "mcp": "npm run mcp --workspace @spectra/server",
     "demo": "npm run demo --workspace @spectra/server",
     "typecheck": "tsc -p packages/server && tsc -p packages/web --noEmit",
-    "build": "npm run build --workspace @spectra/web"
+    "build": "npm run build --workspace @spectra/web",
+    "verify": "npm run verify --workspace @spectra/server --"
   },
   "engines": {
     "node": ">=20"

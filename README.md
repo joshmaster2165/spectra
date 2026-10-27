@@ -185,6 +185,18 @@ When a session reports through hooks, the log observer's copies of its tool call
 
 **Audit log:** every event is appended to `~/.spectra/sessions/<session-id>.jsonl` with owner-only permissions. **Replay** in the top bar reads from it, so sessions survive restarts.
 
+### Tamper-evident log
+
+Each line of the audit log carries a sequence number, the previous line's hash and its own SHA-256 hash, so editing, deleting or reordering any line breaks the chain. The dashboard footer re-verifies the current session every 30 seconds and shows the **head hash** (click to copy); a failed check turns it red with the line number.
+
+```bash
+npm run verify                         # check every recorded session
+npm run verify -- <session-id>         # check one
+npm run verify -- <session-id> <head>  # also confirm a head hash you recorded earlier
+```
+
+A chain alone can't stop someone who rewrites the *entire* file and recomputes every hash. That's what the head hash is for: each exported report includes it, so keep the report (or paste the hash into a ticket). If the log is rewritten later, `npm run verify -- <id> <head>` fails because the recorded head is no longer in the chain. Events appended after you recorded it still pass.
+
 ### Repository layout
 
 ```
@@ -200,7 +212,7 @@ packages/web      Dashboard (React + Vite, d3-force)
 - **Everything stays on your machine.** The hub listens on 127.0.0.1 only and makes no outbound connections.
 - **Other websites can't read it.** The hub refuses requests and WebSocket connections from non-local browser origins, so a page you have open can't read the agent's activity.
 - **The audit log is sensitive.** It contains what the agent saw: file paths, command lines, URLs, your prompts and the agent's reasoning. The hook strips file contents and patches before sending, but treat the log like your shell history. Delete `~/.spectra/sessions` to clear it.
-- **Any local process can send events to the hub.** Agent annotations are labelled, but if you need tamper-evidence, rely on the hook and log records.
+- **Any local process can send events to the hub.** Agent annotations are labelled, and the hash-chained log makes after-the-fact edits detectable, but events injected *as they happen* would be chained like any other. Hooks and the log observer remain the record of what actually ran.
 
 ## Configuration
 
