@@ -11,13 +11,16 @@ import { ActivityLedger } from "./modules/ActivityLedger.tsx";
 import { ChainBuilder } from "./modules/ChainBuilder.tsx";
 import { ExplorationSketch } from "./modules/ExplorationSketch.tsx";
 import { Oversight, type OversightTab } from "./modules/Oversight.tsx";
+import { FilesView } from "./modules/FilesView.tsx";
+import { downloadReport } from "./report.ts";
 import { clock } from "./format.ts";
 
-type View = "network" | "hierarchy" | "node";
+type View = "network" | "hierarchy" | "files" | "node";
 
 const VIEWS: { value: View; label: string }[] = [
   { value: "network", label: "Network" },
   { value: "hierarchy", label: "Hierarchy" },
+  { value: "files", label: "Files" },
   { value: "node", label: "Node" },
 ];
 
@@ -40,6 +43,11 @@ export function App() {
   const violations = state.violations.length;
   const last = state.timeline.at(-1);
 
+  // Unseen violations show in the browser tab title.
+  useEffect(() => {
+    document.title = violations ? `(${violations}) Spectra` : "Spectra";
+  }, [violations]);
+
   return (
     <div className="shell">
       <header className="topbar">
@@ -61,6 +69,9 @@ export function App() {
           {violations > 0 && <span className="alert-pill">{violations} out of scope</span>}
         </button>
         <span className="spacer" />
+        <button className="ghost" onClick={() => downloadReport(state)} title="Download a Markdown report of this session">
+          Report
+        </button>
         {replay.active ? (
           <span className="field link replaying">
             <span className="dot" />
@@ -89,6 +100,7 @@ export function App() {
         >
           {view === "network" && <GlobalMap state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
           {view === "hierarchy" && <TreeView state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
+          {view === "files" && <FilesView state={state} />}
           {view === "node" && <NodeView state={state} nodeId={selected} onSelect={setSelected} />}
         </Panel>
 

@@ -22,13 +22,22 @@ It's built for oversight of agent-assisted security work on targets you're autho
 |---|---|
 | **Map → Network** | Force-directed graph of everything the agent touched: files, searches, commands, MCP tools, and the hosts it contacted |
 | **Map → Hierarchy** | Collapsible tree: session → category → item, including **domain → subdomain → API route** |
+| **Map → Files** | Review coverage: every file in scope marked read, edited or never opened, with per-folder coverage and an "unopened only" filter |
 | **Map → Node** | One object in detail: properties, neighbours, every tool call that touched it, and any scope violations |
 | **Activity** | Live stream of tool calls, the agent's reasoning, and your prompts; out-of-scope calls are marked in red |
-| **Oversight → Findings** | Bugs the agent reported, ranked by status, severity and confidence, each with its evidence trail |
+| **Oversight → Findings** | Bugs the agent reported, ranked by status, severity and confidence. Each shows its evidence trail, the edits made to the affected file, and your review |
 | **Oversight → Scope** | The current scope and every out-of-scope access (path or host, read / write / exec / network) |
 | **Chain** | How the agent linked smaller observations into a larger finding |
 | **Coverage** | Unexplored / active / complete counts and the discovery → linking → confirmed progression |
 | **Replay** | Scrub, step or play back any recorded session, with violations and findings marked on the timeline |
+| **Report** | Download a Markdown summary of the session: scope, findings with review verdicts and remediation, violations, files edited |
+
+### Reviewing the agent's work
+
+- **Your verdict, kept separate.** Expand a finding to mark it *Verified*, *Rejected* or *Needs info* and add a note. The agent's own status ("confirmed", "fixed") stays visible next to your verdict, and the agent can't set verdicts.
+- **Remediation.** When the agent edits the file named in a finding's location, the edit is linked to that finding automatically.
+- **What wasn't checked.** The Files view lists every file in scope, including the ones the agent never opened, so gaps in the review are visible.
+- **Alerts.** Each out-of-scope access sends a desktop notification (macOS and Linux; bursts are grouped, at most one every 5 seconds), and the browser tab title shows the violation count.
 
 ### How recon shows up
 
@@ -94,7 +103,7 @@ You can also change scope while it's running:
 curl -X POST http://127.0.0.1:4317/scope -H 'content-type: application/json' -d '{"paths":["/Users/you/code/target-repo"],"hosts":["example-shop.test"]}'
 ```
 
-The agent has no tool to change the scope, and Spectra rejects scope changes sent the way the agent sends events.
+The agent has no tool to change the scope or review verdicts, and Spectra rejects those events when they're sent the way the agent sends annotations.
 
 ### 3. Connect Claude Code
 
@@ -201,6 +210,7 @@ packages/web      Dashboard (React + Vite, d3-force)
 | `SPECTRA_DATA_DIR` | `~/.spectra/sessions` | Audit log location |
 | `SPECTRA_PERSIST=0` | | Don't write the audit log |
 | `SPECTRA_OBSERVER=0` | | Don't read Claude Code's session logs |
+| `SPECTRA_NOTIFY=0` | | Turn off desktop notifications for scope violations |
 | `SPECTRA_REPLAY=1` | | Load existing session logs on start, not just new activity |
 | `SPECTRA_HUB` | `http://127.0.0.1:4317` | Where the hook, MCP server and demo send events |
 

@@ -9,6 +9,7 @@ import {
   HUB_ONLY_EVENTS,
   type GraphState,
   type Scope,
+  type ScopeViolation,
   type ServerMessage,
   type SessionInfo,
   type SpectraEvent,
@@ -25,7 +26,14 @@ export interface HubOptions {
   dataDir?: string;
   /** Built dashboard (packages/web/dist) to serve at /, if present. */
   staticDir?: string;
+  /** Called for each scope violation (desktop alerts). */
+  onViolation?: (v: ScopeViolation) => void;
 }
+
+const VERDICTS = ["verified", "rejected", "needs-info"];
+/** Directories skipped when listing in-scope files for review coverage. */
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "vendor", "__pycache__", ".venv", "venv", "target", "coverage"]);
+const FILE_LIMIT = 20_000;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -47,6 +55,8 @@ const MIME: Record<string, string> = {
  *   POST /hooks            raw Claude Code hook payload (bin/spectra-hook.mjs)
  *   POST /events           agent/demo annotations (MCP server, demo script)
  *   POST /scope            operator sets the scope { paths, hosts }
+ *   POST /review           operator verdict on a finding { findingId, verdict, note }
+ *   GET  /files            files under the scope paths, for review coverage
  *   WS   /ws               snapshot on connect, then { kind: "event" } messages
  *   GET  /*                built dashboard, when staticDir is set
  */
@@ -84,7 +94,11 @@ export class Hub {
   /** Entry point for every event, trusted or not. */
   publish(event: SpectraEvent) {
     if (!this.accept(event)) return;
+    if (event.type === "finding.upsert" && !this.state.findings[event.finding.id]) {
+      event = { ...event, finding: { ...event.finding, sessionId: event.sessionId } };
+    }
     this.commit(event);
+    if (event.type === "tool.call") this.linkFixes(event);
 
     if (event.type === "session.start" && event.cwd) {
       this.sessionCwds.set(event.sessionId, event.cwd);
@@ -110,8 +124,73 @@ export class Hub {
             summary: event.summary,
           },
         });
+        this.opts.onViolation?.(this.state.violations[this.state.violations.length - 1]);
       }
     }
+  }
+
+  /** A write to a file named in a finding's location is a candidate fix. */
+  private linkFixes(e: Extract<SpectraEvent, { type: "tool.call" }>) {
+    const writes = (e.targets ?? []).filter((t) => t.kind === "path" && t.access === "write");
+    if (!writes.length) return;
+    for (const f of Object.values(this.state.findings)) {
+      const file = f.location?.file;
+      if (!file) continue;
+      for (const t of writes) {
+        const matches = path.isAbsolute(file) ? t.value === path.normalize(file) : t.value.endsWith(path.sep + path.normalize(file));
+        if (!matches) continue;
+        this.commit({
+          ts: e.ts,
+          sessionId: e.sessionId,
+          source: "hub",
+          type: "finding.edit",
+          findingId: f.id,
+          edit: { toolUseId: e.toolUseId, tool: e.tool, path: t.value, ts: e.ts },
+        });
+      }
+    }
+  }
+
+  review(findingId: string, verdict: string, note?: string): boolean {
+    const f = this.state.findings[findingId];
+    if (!f || !VERDICTS.includes(verdict)) return false;
+    this.commit({
+      ts: Date.now(),
+      sessionId: f.sessionId ?? "hub",
+      source: "operator",
+      type: "finding.review",
+      findingId,
+      review: { verdict: verdict as "verified", note: note?.slice(0, 2000) || undefined, ts: Date.now() },
+    });
+    return true;
+  }
+
+  /** Files under each scope path, for the coverage view. */
+  private listScopeFiles() {
+    return (this.state.scope?.paths ?? []).map((root) => {
+      const files: string[] = [];
+      let truncated = false;
+      const walk = (dir: string) => {
+        let entries: fs.Dirent[];
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const ent of entries) {
+          if (files.length >= FILE_LIMIT) return void (truncated = true);
+          if (ent.isSymbolicLink()) continue;
+          const full = path.join(dir, ent.name);
+          if (ent.isDirectory()) {
+            if (!SKIP_DIRS.has(ent.name)) walk(full);
+          } else if (ent.isFile()) {
+            files.push(full);
+          }
+        }
+      };
+      walk(root);
+      return { root, files, truncated };
+    });
   }
 
   ingestHook(p: any) {
@@ -247,6 +326,7 @@ export class Hub {
     if (req.method === "GET") {
       if (url.pathname === "/state") return json(this.state);
       if (url.pathname === "/sessions") return json(this.listSessions());
+      if (url.pathname === "/files") return json(this.listScopeFiles());
       if (url.pathname === "/history") {
         const id = url.searchParams.get("session");
         return json(id ? this.readSession(id) : this.history);
@@ -270,6 +350,8 @@ export class Hub {
             }
           } else if (url.pathname === "/scope") {
             this.setScope(makeScope({ paths: body.paths, hosts: body.hosts }, "config"));
+          } else if (url.pathname === "/review") {
+            if (!this.review(body.findingId, body.verdict, body.note)) return void res.writeHead(400).end("unknown finding or verdict");
           } else {
             return void res.writeHead(404).end();
           }

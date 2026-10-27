@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Hub } from "./hub.ts";
 import { startObserver } from "./observer.ts";
 import { loadScopeConfig } from "./scope.ts";
+import { createNotifier } from "./alerts.ts";
 
 const PORT = Number(process.env.SPECTRA_PORT ?? 4317);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -17,6 +18,7 @@ const hub = new Hub({
   scope,
   dataDir: process.env.SPECTRA_PERSIST === "0" ? undefined : DATA_DIR,
   staticDir: fs.existsSync(path.join(WEB_DIST, "index.html")) ? WEB_DIST : undefined,
+  onViolation: process.env.SPECTRA_NOTIFY === "0" ? undefined : createNotifier(),
 });
 await hub.listen(PORT);
 

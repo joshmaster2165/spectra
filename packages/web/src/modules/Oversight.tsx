@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { SEVERITY_RANK, type Finding, type GraphState } from "@spectra/schema";
+import { SEVERITY_RANK, type Finding, type GraphState, type Review } from "@spectra/schema";
 import { Segmented } from "../components/Panel.tsx";
 import { clock, formatTool } from "../format.ts";
 
 export type OversightTab = "findings" | "scope";
+
+const VERDICT_LABEL: Record<Review["verdict"], string> = { verified: "Verified", rejected: "Rejected", "needs-info": "Needs info" };
 
 /** Findings ranked by severity/confidence with their evidence trail, plus scope status and violations. */
 export function Oversight({
@@ -64,6 +66,11 @@ function Findings({ state, onSelect }: { state: GraphState; onSelect: (id: strin
             <span className="spacer" />
             <span className={`chip ${f.status === "confirmed" ? "complete" : f.status === "suspected" ? "active" : "unexplored"}`}>{f.status}</span>
             {f.reportedBy === "mcp" && <span className="claim" title="Reported by the agent; verify against the evidence">agent-reported</span>}
+            {f.review ? (
+              <span className={`verdict ${f.review.verdict}`} title={f.review.note}>{VERDICT_LABEL[f.review.verdict]}</span>
+            ) : (
+              <span className="verdict pending">Unreviewed</span>
+            )}
           </div>
           {open === f.id && <Evidence finding={f} state={state} onSelect={onSelect} />}
         </li>
@@ -75,6 +82,7 @@ function Findings({ state, onSelect }: { state: GraphState; onSelect: (id: strin
 function Evidence({ finding, state, onSelect }: { finding: Finding; state: GraphState; onSelect: (id: string) => void }) {
   const steps = (finding.stepIds ?? []).map((id) => state.chain[id]).filter(Boolean);
   const nodes = (finding.nodeIds ?? []).map((id) => state.nodes[id]).filter(Boolean);
+  const edits = finding.edits ?? [];
   return (
     <div className="evidence">
       {finding.description && <p>{finding.description}</p>}
@@ -90,6 +98,20 @@ function Evidence({ finding, state, onSelect }: { finding: Finding; state: Graph
           </ol>
         </>
       )}
+      <h5>Remediation</h5>
+      {edits.length ? (
+        <ul className="edits">
+          {edits.map((e) => (
+            <li key={e.toolUseId}>
+              <time>{clock(e.ts)}</time>
+              <span className="tool">{formatTool(e.tool)}</span>
+              <code>{e.path.split("/").slice(-3).join("/")}</code>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">{finding.location?.file ? "No edits to this file yet." : "No file location; edits can't be linked."}</p>
+      )}
       {nodes.length > 0 && (
         <>
           <h5>Objects</h5>
@@ -102,6 +124,37 @@ function Evidence({ finding, state, onSelect }: { finding: Finding; state: Graph
           </div>
         </>
       )}
+      <ReviewForm finding={finding} />
+    </div>
+  );
+}
+
+/** Operator verdict; posted to the hub, which records it as an operator event. */
+function ReviewForm({ finding }: { finding: Finding }) {
+  const [note, setNote] = useState(finding.review?.note ?? "");
+  const [error, setError] = useState<string>();
+  const submit = async (verdict: Review["verdict"]) => {
+    setError(undefined);
+    const res = await fetch("/review", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ findingId: finding.id, verdict, note }),
+    }).catch(() => undefined);
+    if (!res?.ok) setError("Couldn't reach the hub.");
+  };
+  return (
+    <div className="review">
+      <h5>Your review</h5>
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Notes: how you checked it, what's missing…" rows={2} />
+      <div className="review-actions">
+        {(Object.keys(VERDICT_LABEL) as Review["verdict"][]).map((v) => (
+          <button key={v} className={`${v} ${finding.review?.verdict === v ? "on" : ""}`} onClick={() => submit(v)}>
+            {VERDICT_LABEL[v]}
+          </button>
+        ))}
+        {finding.review && <span className="muted">Saved {clock(finding.review.ts)}</span>}
+        {error && <span className="alert-text">{error}</span>}
+      </div>
     </div>
   );
 }

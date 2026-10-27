@@ -12,6 +12,8 @@ export default defineConfig({
       "/state": HUB,
       "/sessions": HUB,
       "/history": HUB,
+      "/files": HUB,
+      "/review": HUB,
     },
   },
 });

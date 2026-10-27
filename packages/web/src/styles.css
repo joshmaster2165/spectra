@@ -306,8 +306,8 @@ button.field:hover span { color: var(--text-hi); }
 .f-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; cursor: pointer; }
 .f-title { color: var(--text-hi); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .f-row:hover .f-title { text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 3px; }
-.f-sub { display: flex; align-items: center; gap: 8px; margin-top: 5px; padding-left: 64px; font-size: 11px; }
-.f-id { font-family: var(--mono); color: var(--muted); font-size: 10.5px; }
+.f-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 5px; padding-left: 64px; font-size: 11px; }
+.f-id { font-family: var(--mono); color: var(--muted); font-size: 10.5px; white-space: nowrap; }
 .claim { font-family: var(--cond); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); border: 1px dashed var(--line-hi); padding: 0 5px; }
 .conf { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .conf-bar { width: 44px; height: 4px; background: var(--line-hi); }
@@ -377,3 +377,59 @@ button.ghost:hover { border-color: var(--muted); color: var(--text-hi); }
 .replay-pos { font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .replay .exit { background: none; border: 1px solid #3a2e17; color: var(--active); padding: 3px 10px; cursor: pointer; border-radius: 2px; font-family: var(--cond); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; white-space: nowrap; }
 .replay .exit:hover { border-color: var(--active); }
+
+/* ── Review & remediation ────────────────── */
+.verdict {
+  font-family: var(--cond); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 0 5px; border-radius: 2px; line-height: 15px; white-space: nowrap;
+}
+.verdict.pending { color: var(--muted); border: 1px dashed var(--line-hi); }
+.verdict.verified { color: var(--bg); background: var(--complete); }
+.verdict.rejected { color: var(--text); background: var(--line-hi); text-decoration: line-through; }
+.verdict.needs-info { color: var(--bg); background: var(--accent); }
+.edits { list-style: none; margin: 0; padding: 0; }
+.edits li { display: grid; grid-template-columns: 58px auto minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 11px; align-items: baseline; }
+.edits time { font-family: var(--mono); color: var(--muted); font-size: 10.5px; }
+.edits .tool { font-family: var(--mono); color: var(--active); }
+.review { margin-top: 10px; padding-top: 4px; border-top: 1px solid var(--line); }
+.review textarea {
+  width: 100%; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--line-hi); border-radius: 2px;
+  font: inherit; font-size: 11.5px; padding: 6px 8px;
+}
+.review textarea:focus { outline: none; border-color: var(--accent); }
+.review-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.review-actions button {
+  background: none; border: 1px solid var(--line-hi); color: var(--text); border-radius: 2px; cursor: pointer;
+  padding: 3px 10px; font-family: var(--cond); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+}
+.review-actions button:hover { border-color: var(--muted); }
+.review-actions button.verified.on { background: var(--complete); border-color: var(--complete); color: var(--bg); }
+.review-actions button.rejected.on { background: var(--line-hi); }
+.review-actions button.needs-info.on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.review-actions .muted { font-size: 10.5px; font-family: var(--mono); }
+
+/* ── Files coverage view ─────────────────── */
+.files-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.files-head { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel); font-size: 11.5px; }
+.files-head b { color: var(--text-hi); font-family: var(--mono); font-weight: 500; }
+.files-note { margin: 6px 14px 0; font-size: 11px; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-family: var(--cond); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; cursor: pointer; }
+.check input { accent-color: var(--accent); margin: 0; }
+.file-tree, .file-tree ul { list-style: none; margin: 0; padding: 0; }
+.file-tree { flex: 1; overflow: auto; padding: 6px 0; }
+.file-row { display: flex; align-items: center; gap: 8px; height: 24px; padding-right: 14px; font-size: 11.5px; }
+.file-row:hover { background: var(--hover); }
+.file-row.dir { cursor: pointer; }
+.file-row .caret { color: var(--muted); display: grid; place-items: center; width: 10px; }
+.file-name { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.file-row.dir .file-name { color: var(--text-hi); }
+.file-row.unopened .file-name { color: var(--muted); }
+.file-dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--unexplored); flex-shrink: 0; }
+.file-row.read .file-dot { background: var(--complete); border-color: var(--complete); }
+.file-row.edited .file-dot { background: var(--active); border-color: var(--active); }
+.file-meta { font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap; }
+.file-cov { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.legend { display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 10.5px; color: var(--muted); }
+.legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; border: 1.5px solid var(--unexplored); }
+.legend i.read { background: var(--complete); border-color: var(--complete); }
+.legend i.edited { background: var(--active); border-color: var(--active); }
