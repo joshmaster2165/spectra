@@ -234,7 +234,7 @@ select {
 .card .tag { color: var(--muted); font-family: var(--cond); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
 
 /* ── Chain ───────────────────────────────── */
-.chain-svg { height: 100%; max-height: 100%; }
+.chain-svg { flex-shrink: 0; }
 .step { cursor: pointer; }
 .step rect { fill: var(--panel-2); stroke: var(--line-hi); stroke-width: 1; }
 .step .step-bar { fill: var(--accent); stroke: none; }

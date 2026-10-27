@@ -8,6 +8,8 @@
 
 Every session is recorded so you can replay it afterwards.
 
+![Spectra dashboard: network map, activity stream with an out-of-scope request flagged, ranked findings, reasoning chain and coverage](docs/dashboard.png)
+
 Spectra **observes; it never drives**. It doesn't send prompts, approve tools or run commands. The hook it installs prints nothing and always exits 0, so it can't block, change or noticeably slow a tool call.
 
 It's built for oversight of agent-assisted security work on targets you're authorized to test: your own code, a pentest engagement, or a bug bounty program within its published scope.

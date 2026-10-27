@@ -110,7 +110,7 @@ export function App() {
       </main>
 
       <footer className="statusbar">
-        <span>Hub 127.0.0.1:4317</span>
+        <span>Hub {location.host}</span>
         <span>Hooks · Observer · MCP</span>
         <span>Audit log ~/.spectra/sessions</span>
         <span className="spacer" />
