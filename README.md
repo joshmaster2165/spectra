@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/banner.webp" alt="Spectra" width="640"></p>
+<p align="center"><img src="docs/logo.svg" alt="Spectra — Analytics Engine" width="420"></p>
 
 # Spectra
 
