@@ -43,6 +43,7 @@ button { font: inherit; }
 }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text-hi); }
 .wordmark { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: 0.42em; margin-right: -0.42em; }
+.tagline { font-family: var(--cond); font-weight: 500; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); padding-left: 10px; border-left: 1px solid var(--line-hi); }
 .divider { width: 1px; height: 18px; background: var(--line-hi); }
 .field { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text); }
 .field label { font-family: var(--cond); text-transform: uppercase; letter-spacing: 0.14em; font-size: 10px; color: var(--muted); }
@@ -128,25 +129,48 @@ select {
 .imp i.on { background: var(--active); }
 
 /* ── Network view ────────────────────────── */
-.map-svg { width: 100%; height: 100%; display: block; }
+.map-wrap { position: relative; width: 100%; height: 100%; user-select: none; -webkit-user-select: none; }
+.map-svg { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.map-svg.panning { cursor: grabbing; }
+.map-bg { fill: transparent; }
 .edge { stroke: var(--line-hi); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .edge.labelled { stroke: var(--accent); stroke-opacity: 0.55; }
 .edge-label { fill: var(--accent); font-family: var(--mono); font-size: 9px; text-anchor: middle; opacity: 0.8; }
 .node { cursor: pointer; }
-.node circle, .node rect { fill: var(--bg); stroke-width: 1.5; vector-effect: non-scaling-stroke; transition: fill 0.3s, stroke 0.3s; }
+.node .disc { fill: var(--panel-2); stroke: var(--line-hi); stroke-width: 1.5; vector-effect: non-scaling-stroke; transition: stroke 0.3s; }
+.node .glyph { fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: stroke 0.3s; }
 .node text {
   fill: var(--text); font-family: var(--mono); font-size: 10px; text-anchor: middle; pointer-events: none;
   paint-order: stroke; stroke: var(--bg); stroke-width: 3px;
 }
 .node.root text { fill: var(--text-hi); font-weight: 500; }
-.node.unexplored circle, .node.unexplored rect { stroke: var(--unexplored); }
-.node.active circle, .node.active rect { stroke: var(--active); fill: #2a1f0e; }
-.node.active.leaf circle { animation: pulse 1.6s ease-in-out infinite; }
-.node.complete circle, .node.complete rect { stroke: var(--complete); fill: #10261e; }
-.node.leaf.complete circle { fill: var(--complete); }
-.node.root circle { stroke: var(--accent); stroke-width: 2; fill: #132029; }
-.node .ring { fill: none; stroke: var(--text-hi); stroke-width: 1; stroke-dasharray: 2 2; }
-@keyframes pulse { 50% { stroke-opacity: 0.25; } }
+.node.unexplored .disc, .node.unexplored .glyph { stroke: var(--unexplored); }
+.node.active .disc, .node.active .glyph { stroke: var(--active); }
+.node.active.leaf .disc { animation: pulse 1.6s ease-in-out infinite; }
+.node.complete .disc, .node.complete .glyph { stroke: var(--complete); }
+.node.root .disc { fill: #132029; }
+.node.root .disc, .node.root .glyph { stroke: var(--accent); }
+.node .ring { fill: none; stroke: var(--text-hi); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+@keyframes pulse { 50% { stroke-opacity: 0.35; } }
+
+.map-controls { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.map-controls button {
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; padding: 0;
+  background: var(--panel); border: 1px solid var(--line-hi); color: var(--text);
+  border-radius: 3px; cursor: pointer; font-size: 15px; line-height: 1;
+}
+.map-controls button:hover { background: var(--hover); border-color: var(--muted); color: var(--text-hi); }
+.map-controls button.on { border-color: var(--accent); color: var(--accent); }
+.map-zoom-label { font-family: var(--mono); font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.map-legend {
+  position: absolute; left: 10px; bottom: 10px;
+  display: grid; grid-template-columns: auto auto; gap: 4px 14px;
+  background: rgba(14, 16, 19, 0.92); border: 1px solid var(--line-hi); border-radius: 4px; padding: 8px 11px;
+}
+.leg-item { display: flex; align-items: center; gap: 7px; font-family: var(--cond); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.leg-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.leg-item .glyph { fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── Hierarchy view ──────────────────────── */
 .tree, .tree ul { list-style: none; margin: 0; padding: 0; }

@@ -2,11 +2,11 @@
 
 # Spectra
 
-**A live, read-only dashboard for watching a Claude Code agent work.** Spectra turns the agent's terminal stream into a local dashboard showing:
-- what it explored, as a map,
-- the hosts, subdomains and API routes it contacted,
-- the chain of steps behind each finding,
-- anything it touched outside the scope you set.
+**A live attack-surface map for authorized, agent-assisted bug hunting.** Spectra turns a Claude Code agent's terminal stream into a local recon map showing:
+- the attack surface it mapped — hosts, subdomains, API endpoints and parameters,
+- the files, searches and commands behind that recon,
+- the attack chain behind each finding, with a second-AI validator scoring where to dig next,
+- anything it touched outside the scope you authorized.
 
 Every session is recorded so you can replay it afterwards.
 
@@ -22,17 +22,18 @@ It's built for oversight of agent-assisted security work on targets you're autho
 
 | Panel | Shows |
 |---|---|
-| **Map → Network** | Force-directed graph of everything the agent touched: files, searches, commands, MCP tools, and the hosts it contacted |
-| **Map → Hierarchy** | Collapsible tree: session → category → item, including **domain → subdomain → API route** |
-| **Map → Files** | Review coverage: every file in scope marked read, edited or never opened, with per-folder coverage and an "unopened only" filter |
-| **Map → Node** | One object in detail: properties, neighbours, every tool call that touched it, and any scope violations |
+| **Attack Surface → Graph** | Zoomable, pannable force-directed map of the surface the agent touched — hosts, subdomains, endpoints, parameters, files, searches and commands — each target drawn with a per-type icon. Scroll to zoom, drag to pan, click to inspect |
+| **Attack Surface → Tree** | Collapsible tree: session → category → target, including **domain → subdomain → API endpoint** |
+| **Attack Surface → Files** | Code-review coverage: every file in scope marked read, edited or never opened, with per-folder coverage and an "unopened only" filter |
+| **Attack Surface → Target** | One target in detail: properties, neighbours, every tool call that touched it, and any scope violations |
 | **Activity** | Live stream of tool calls, the agent's reasoning, and your prompts; out-of-scope calls are marked in red |
-| **Oversight → Findings** | Bugs the agent reported, ranked by status, severity and confidence. Each shows its evidence trail, the edits made to the affected file, and your review |
-| **Oversight → Scope** | The current scope and every out-of-scope access (path or host, read / write / exec / network) |
-| **Chain** | How the agent linked smaller observations into a larger finding |
-| **Coverage** | Unexplored / active / complete counts and the discovery → linking → confirmed progression |
+| **Oversight → Findings** | Vulnerabilities the agent reported, ranked by status, severity and confidence. Each shows its attack chain, the validator's verdict, the edits to the affected file, and your review |
+| **Oversight → Navigator** | The validator's scored leads — pursue / watch / skip, with suspected bug class and confidence — pointing at where the promise is |
+| **Oversight → Scope** | The authorized scope and every out-of-scope access (path or host, read / write / exec / network) |
+| **Chain** | How the agent linked smaller observations into an attack chain |
+| **Coverage** | Unmapped / active / confirmed counts and the discovery → linking → confirmed progression |
 | **Replay** | Scrub, step or play back any recorded session, with violations and findings marked on the timeline |
-| **Report** | Download a Markdown summary of the session: scope, findings with review verdicts and remediation, violations, files edited |
+| **Report** | Download a Markdown summary of the session: scope, findings with verdicts and remediation, violations, files edited |
 
 ### Reviewing the agent's work
 
@@ -135,17 +136,17 @@ claude mcp add spectra -- npx tsx "$(pwd)/packages/server/src/mcp.ts"
 
 | Tool | Use |
 |---|---|
-| `map_topology_node` | Add something discovered (a subdomain, route, parameter, module) to the map |
-| `link_nodes` | Connect two map objects with a labelled edge |
-| `update_chain` | Add a step to the reasoning chain behind a finding |
-| `report_finding` | Report a bug: severity, confidence, status, file/line, supporting steps |
+| `map_target` | Add a discovered target (host, subdomain, endpoint, parameter, module) to the attack-surface map |
+| `link_nodes` | Connect two targets with a labelled edge |
+| `update_chain` | Add a step to the attack chain behind a finding |
+| `report_finding` | Report a vulnerability: severity, confidence, status, file/line, supporting steps |
 | `log_thought` | Explain a change of direction |
 
 Anything reported this way is labelled **agent-reported** in the dashboard. Treat it as the agent's claim and check it against the evidence; the hooks and logs record what actually ran.
 
 A line like this in the project's `CLAUDE.md` helps the agent use them:
 
-> Record discovered hosts, routes and parameters with `map_topology_node`, and report suspected bugs with `report_finding`, linking the chain steps that support them.
+> Record discovered hosts, subdomains, endpoints and parameters with `map_target`, and report suspected vulnerabilities with `report_finding`, linking the attack-chain steps that support them.
 
 ### 5. Try it without an agent
 
@@ -153,7 +154,22 @@ A line like this in the project's `CLAUDE.md` helps the agent use them:
 npm run demo
 ```
 
-This plays a scripted audit session with a confirmed finding and a scope violation.
+This plays a scripted audit session with a confirmed finding, a scope violation, and the Navigator's leads.
+
+---
+
+## The Navigator — a validator in the second seat
+
+The Navigator is an optional second AI that reads the same map you do and advises on where the authorized bug hunting is promising. It connects to the hub as a **read-only** consumer — like the dashboard — rebuilds the attack-surface state, and asks a model to score it into **leads** (pursue / watch / skip, with a suspected bug class and confidence) and to give an **independent verdict** on each finding the agent reports. It never touches the target, and the hub won't let it set scope or operator verdicts.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+npm run validator
+```
+
+Its advice shows up in **Oversight → Navigator** (ranked leads), inline on each finding (its verdict, beside the agent's status and your review), and as a halo on the highest-promise targets in the graph. It gives **direction and prioritization only** — triage, not exploit payloads — and never promotes an out-of-scope target. Set `SPECTRA_VALIDATOR_MODEL` to change the model (default `claude-opus-5-5`).
+
+> **Note:** the Navigator is the one part of Spectra that makes an outbound connection — to the Anthropic API. The hub itself still makes none. Leave it off if you don't want any egress.
 
 ---
 

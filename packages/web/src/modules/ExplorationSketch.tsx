@@ -9,9 +9,9 @@ export function ExplorationSketch({ state }: { state: GraphState }) {
   const count = (s: string) => nodes.filter((n) => n.status === s).length;
   const total = nodes.length || 1;
   const bands = [
-    { key: "unexplored", n: count("unexplored") },
-    { key: "active", n: count("active") },
-    { key: "complete", n: count("complete") },
+    { key: "unexplored", label: "unmapped", n: count("unexplored") },
+    { key: "active", label: "active", n: count("active") },
+    { key: "complete", label: "confirmed", n: count("complete") },
   ];
   const confirmed = Object.values(state.chain).filter((s) => s.confirmed).length;
   const stage =
@@ -21,13 +21,13 @@ export function ExplorationSketch({ state }: { state: GraphState }) {
     <div className="sketch-body">
       <div className="spectrum">
         {bands.map((b) => (
-          <div key={b.key} className={`band ${b.key}`} style={{ flexGrow: b.n }} title={`${b.key}: ${b.n}`} />
+          <div key={b.key} className={`band ${b.key}`} style={{ flexGrow: b.n }} title={`${b.label}: ${b.n}`} />
         ))}
       </div>
       <dl className="stats">
         {bands.map((b) => (
           <div key={b.key}>
-            <dt>{b.key}</dt>
+            <dt>{b.label}</dt>
             <dd>{b.n}</dd>
           </div>
         ))}

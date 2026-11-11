@@ -4,9 +4,9 @@ import { z } from "zod";
 import type { SpectraEvent } from "@spectra/schema";
 
 /**
- * Visualization MCP Server. Claude Code launches this over stdio; the agent
- * calls these tools to annotate the map explicitly, and we forward each call
- * to the hub as SpectraEvents.
+ * Spectra recon MCP server. Claude Code launches this over stdio; the agent
+ * calls these tools to annotate the attack-surface map as it works, and we
+ * forward each call to the hub as SpectraEvents.
  *
  *   claude mcp add spectra -- npx tsx /path/to/Spectra/packages/server/src/mcp.ts
  *
@@ -36,10 +36,10 @@ const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
 const server = new McpServer({ name: "spectra", version: "0.1.0" });
 
 server.tool(
-  "map_topology_node",
-  "Add or update a node on the Spectra map: something you discovered (a module, route, file, parameter). Link it to a parent to build the tree.",
+  "map_target",
+  "Add or update a target on the attack-surface map: an asset you discovered — a host, subdomain, API endpoint, parameter, or module. Link it to a parent to build the surface tree (domain → subdomain → endpoint → parameter).",
   {
-    id: z.string().describe("Stable id, e.g. 'route:/api/login'"),
+    id: z.string().describe("Stable id, e.g. 'endpoint:/api/login'"),
     label: z.string(),
     kind: z.enum(["root", "category", "leaf"]).default("leaf"),
     status: z.enum(["unexplored", "active", "complete"]).default("active"),
@@ -60,7 +60,7 @@ server.tool(
 
 server.tool(
   "link_nodes",
-  "Draw a labelled connection between two existing map nodes.",
+  "Draw a labelled relationship between two targets on the map (for example an endpoint → a parameter it reflects, or a subdomain → a login it exposes).",
   { source: z.string(), target: z.string(), label: z.string().optional() },
   async ({ source, target, label }) => {
     await post([{ type: "edge.upsert", edge: { id: `${source}=>${target}`, source, target, label } }]);
@@ -70,7 +70,7 @@ server.tool(
 
 server.tool(
   "update_chain",
-  "Add a step to a chain: how smaller findings connect into a larger story. Use `after` to point arrows from earlier steps.",
+  "Add a step to an attack chain: how smaller observations connect into a vulnerability. Use `after` to point arrows from earlier steps.",
   {
     chainId: z.string().default("main"),
     id: z.string(),
@@ -88,7 +88,7 @@ server.tool(
 
 server.tool(
   "report_finding",
-  "Report or update a suspected bug or vulnerability in the code under review. Link the chain steps and map nodes that support it so a reviewer can check the evidence.",
+  "Report or update a suspected vulnerability on an in-scope target. Link the attack-chain steps and targets that support it so a reviewer can check the evidence.",
   {
     id: z.string().describe("Stable id; reuse it to update the same finding"),
     title: z.string(),
@@ -111,7 +111,7 @@ server.tool(
 
 server.tool(
   "log_thought",
-  "Explain to the viewer why you are switching tasks or what you are about to try.",
+  "Explain to the operator why you are changing direction or what you are about to probe next.",
   { text: z.string(), reason: z.string().optional() },
   async ({ text, reason }) => {
     await post([{ type: "thought", text, reason }]);

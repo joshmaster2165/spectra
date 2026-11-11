@@ -19,10 +19,10 @@ import { clock } from "./format.ts";
 type View = "network" | "hierarchy" | "files" | "node";
 
 const VIEWS: { value: View; label: string }[] = [
-  { value: "network", label: "Network" },
-  { value: "hierarchy", label: "Hierarchy" },
+  { value: "network", label: "Graph" },
+  { value: "hierarchy", label: "Tree" },
   { value: "files", label: "Files" },
-  { value: "node", label: "Node" },
+  { value: "node", label: "Target" },
 ];
 
 export function App() {
@@ -55,6 +55,7 @@ export function App() {
         <span className="brand">
           <Logo />
           <span className="wordmark">SPECTRA</span>
+          <span className="tagline">attack surface</span>
         </span>
         <span className="divider" />
         <span className="field">
@@ -95,9 +96,9 @@ export function App() {
       <main className="grid">
         <Panel
           area="map"
-          title="Map"
+          title="Attack Surface"
           controls={<Segmented value={view} options={VIEWS} onChange={setView} />}
-          meta={`${nodeCount} objects · ${edgeCount} links`}
+          meta={`${nodeCount} targets · ${edgeCount} links`}
         >
           {view === "network" && <GlobalMap state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
           {view === "hierarchy" && <TreeView state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
