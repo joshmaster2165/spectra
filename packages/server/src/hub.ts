@@ -96,6 +96,8 @@ export class Hub {
     this.wss.on("connection", (ws) => send(ws, { kind: "snapshot", state: this.state }));
     if (opts.dataDir) this.audit = new AuditLog(opts.dataDir);
     if (opts.scope.paths?.length) this.setScope(makeScope(opts.scope, "config"));
+    // Hosts without paths: authorize the hosts now; each session's directory joins as it starts.
+    else if (opts.scope.hosts?.length) this.setScope(makeScope({ hosts: opts.scope.hosts }, "session"));
   }
 
   listen(port: number, host = "127.0.0.1") {
@@ -251,8 +253,8 @@ export class Hub {
     }
   }
 
-  setScope(scope: Scope) {
-    this.commit({ ts: Date.now(), sessionId: "hub", source: "hub", type: "scope.set", scope });
+  setScope(scope: Scope, source: "hub" | "operator" = "hub") {
+    this.commit({ ts: Date.now(), sessionId: "hub", source, type: "scope.set", scope });
   }
 
   /** Dedupe and drop events that would double-count the same tool call. */
@@ -358,6 +360,9 @@ export class Hub {
               // External callers can only speak as the agent (mcp) or the demo.
               const source = e.source === "demo" ? "demo" : "mcp";
               const event = { ts: Date.now(), ...e, source } as SpectraEvent;
+              // The MCP server's default session ("mcp") joins the live session, so the agent's
+              // findings land in that session's record, replay and report.
+              if (source === "mcp" && event.sessionId === "mcp" && this.state.sessionId) event.sessionId = this.state.sessionId;
               if (event.type === "finding.upsert") event.finding = { ...event.finding, reportedBy: source };
               this.publish(event);
             }
@@ -371,7 +376,12 @@ export class Hub {
             if (!Array.isArray(body?.entries)) return void res.writeHead(400).end("expected { entries: [...] }");
             return json(this.importTraffic(body.entries, body));
           } else if (url.pathname === "/scope") {
-            this.setScope(makeScope({ paths: body.paths, hosts: body.hosts }, "config"));
+            // A field left out keeps its current value, so `{ hosts }` alone doesn't clear the paths.
+            const current = this.state.scope;
+            const paths = Array.isArray(body?.paths) ? body.paths : current?.paths;
+            const hosts = Array.isArray(body?.hosts) ? body.hosts : current?.hosts;
+            const origin = Array.isArray(body?.paths) ? "config" : (current?.origin ?? "session");
+            this.setScope(makeScope({ paths, hosts }, origin), "operator");
           } else if (url.pathname === "/review") {
             if (!this.review(body.findingId, body.verdict, body.note)) return void res.writeHead(400).end("unknown finding or verdict");
           } else {

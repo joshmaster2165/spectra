@@ -1,0 +1,262 @@
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import type { Assessment, GraphState, MapNode, NodeStatus } from "@spectra/schema";
+import { Segmented } from "../components/Panel.tsx";
+import { Confidence, StatusChip } from "../components/Status.tsx";
+
+type Show = "endpoints" | "hosts" | "params";
+type Source = "agent" | "proxy" | "both";
+type StatusFilter = "all" | NodeStatus;
+
+interface Row {
+  id: string;
+  /** Discovery order, 1-based (the hub's insertion order). */
+  order: number;
+  label: string;
+  /** Host for endpoints and params; the domain for subdomains. */
+  host: string;
+  /** The endpoint a parameter belongs to. */
+  endpoint: string;
+  status: NodeStatus;
+  source: Source;
+  /** Parameters (endpoint rows) or endpoints (host rows). */
+  count: number;
+  requests: number;
+  lead?: Assessment;
+  findings: number;
+}
+
+interface Col {
+  key: string;
+  label: string;
+  /** Numeric/ranked columns sort high-to-low first and align right. */
+  num?: boolean;
+  value: (r: Row) => string | number;
+  render: (r: Row) => ReactNode;
+  className?: string;
+}
+
+const STATUS_RANK: Record<NodeStatus, number> = { unexplored: 0, active: 1, complete: 2 };
+const REC_RANK = { pursue: 3, watch: 2, skip: 1 } as const;
+const NEW_MS = 2200;
+
+const leadScore = (a?: Assessment) => (a ? REC_RANK[a.recommendation] + a.confidence : 0);
+const sourceOf = (n: MapNode): Source => {
+  const seen = n.meta?.["seen in"];
+  return seen === "proxy traffic" ? "proxy" : seen === "agent and proxy traffic" ? "both" : "agent";
+};
+const isHost = (n: MapNode) => n.category === "hosts" && (n.id.startsWith("domain:") || n.id.startsWith("host:"));
+
+const order: Col = { key: "order", label: "#", num: true, value: (r) => r.order, render: (r) => r.order, className: "dim" };
+const status: Col = {
+  key: "status",
+  label: "Status",
+  value: (r) => STATUS_RANK[r.status],
+  render: (r) => <StatusChip status={r.status} />,
+};
+const source: Col = { key: "source", label: "Source", value: (r) => r.source, render: (r) => <span className={`src ${r.source}`}>{r.source}</span> };
+const lead = (label: string): Col => ({
+  key: "lead",
+  label,
+  num: true,
+  value: (r) => leadScore(r.lead),
+  render: (r) =>
+    r.lead ? (
+      <span className="lead-cell" title={r.lead.rationale}>
+        <span className={`rec ${r.lead.recommendation}`}>{r.lead.recommendation}</span>
+        <Confidence value={r.lead.confidence} />
+      </span>
+    ) : (
+      <span className="dim">—</span>
+    ),
+});
+const text = (key: keyof Row, label: string, className?: string): Col => ({
+  key,
+  label,
+  value: (r) => String(r[key] ?? ""),
+  render: (r) => (r[key] as string) || <span className="dim">—</span>,
+  className,
+});
+const count = (key: "count" | "requests" | "findings", label: string): Col => ({
+  key,
+  label,
+  num: true,
+  value: (r) => r[key],
+  render: (r) => (r[key] ? r[key] : <span className="dim">0</span>),
+});
+
+const COLUMNS: Record<Show, Col[]> = {
+  endpoints: [order, text("label", "Endpoint", "target"), text("host", "Host", "mono"), status, source, count("count", "Params"), count("requests", "Requests"), lead("Lead"), count("findings", "Findings")],
+  hosts: [order, text("label", "Host", "target"), text("host", "Domain", "mono"), status, count("count", "Endpoints"), source, lead("Best lead")],
+  params: [order, text("label", "Param", "target"), text("endpoint", "Endpoint", "mono"), text("host", "Host", "mono"), status, source],
+};
+
+/**
+ * Surface view: the attack surface as a live, sortable table. Newest first by
+ * default, so discoveries land at the top as they come in.
+ */
+export function SurfaceTable({
+  state,
+  selected,
+  onSelect,
+  onOpen,
+}: {
+  state: GraphState;
+  selected?: string;
+  onSelect: (id: string) => void;
+  onOpen: (id: string) => void;
+}) {
+  const [show, setShow] = useState<Show>("endpoints");
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: "order", dir: -1 });
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [leadsOnly, setLeadsOnly] = useState(false);
+  const firstSeen = useRef<Record<Show, Map<string, number>>>({ endpoints: new Map(), hosts: new Map(), params: new Map() });
+
+  const rows = useMemo(() => buildRows(state, show), [state.nodes, state.assessments, state.findings, show]);
+
+  // Rows that appeared after this view was first shown get a brief highlight.
+  const now = Date.now();
+  const seen = firstSeen.current[show];
+  const initial = seen.size === 0;
+  for (const r of rows) if (!seen.has(r.id)) seen.set(r.id, initial ? 0 : now);
+
+  const cols = COLUMNS[show];
+  const col = cols.find((c) => c.key === sort.key) ?? cols[0];
+  const q = query.trim().toLowerCase();
+  const visible = rows
+    .filter((r) => statusFilter === "all" || r.status === statusFilter)
+    .filter((r) => !leadsOnly || r.lead)
+    .filter((r) => !q || `${r.label} ${r.host} ${r.endpoint}`.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const x = col.value(a);
+      const y = col.value(b);
+      const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+      return c * sort.dir || b.order - a.order;
+    });
+
+  const sortBy = (c: Col) => setSort((s) => (s.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: c.num ? -1 : 1 }));
+
+  return (
+    <div className="surface">
+      <div className="surface-bar">
+        <Segmented<Show>
+          value={show}
+          onChange={setShow}
+          options={[
+            { value: "endpoints", label: "Endpoints" },
+            { value: "hosts", label: "Hosts" },
+            { value: "params", label: "Params" },
+          ]}
+        />
+        <input type="search" placeholder="Filter by target or host" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Segmented<StatusFilter>
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: "all", label: "All" },
+            { value: "unexplored", label: "Unmapped" },
+            { value: "active", label: "Active" },
+            { value: "complete", label: "Confirmed" },
+          ]}
+        />
+        <button className={`toggle ${leadsOnly ? "on" : ""}`} onClick={() => setLeadsOnly((v) => !v)} title="Only rows the Navigator has scored">
+          Leads only
+        </button>
+        <span className="surface-count">
+          {visible.length === rows.length ? `${rows.length} ${show}` : `${visible.length} of ${rows.length} ${show}`}
+        </span>
+      </div>
+      <div className="surface-scroll">
+        {rows.length ? (
+          <table>
+            <thead>
+              <tr>
+                {cols.map((c) => (
+                  <th key={c.key} className={`${c.num ? "num" : ""} ${c.key === col.key ? "sorted" : ""}`} onClick={() => sortBy(c)} aria-sort={c.key === col.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
+                    {c.label}
+                    {c.key === col.key && <span className="sort-arrow">{sort.dir === 1 ? "▲" : "▼"}</span>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((r) => (
+                <tr
+                  key={r.id}
+                  className={`${selected === r.id ? "selected" : ""} ${now - (seen.get(r.id) ?? 0) < NEW_MS ? "new" : ""}`}
+                  onClick={() => onSelect(r.id)}
+                  onDoubleClick={() => onOpen(r.id)}
+                >
+                  {cols.map((c) => (
+                    <td key={c.key} className={`${c.num ? "num" : ""} ${c.className ?? ""}`}>
+                      {c.render(r)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="empty">No {show} mapped yet.</div>
+        )}
+        {rows.length > 0 && !visible.length && <div className="empty">Nothing matches these filters.</div>}
+      </div>
+    </div>
+  );
+}
+
+function buildRows(state: GraphState, show: Show): Row[] {
+  const ids = Object.keys(state.nodes);
+  const orderOf = new Map(ids.map((id, i) => [id, i + 1]));
+  const children = new Map<string, MapNode[]>();
+  for (const n of Object.values(state.nodes)) {
+    if (!n.parentId) continue;
+    const list = children.get(n.parentId) ?? [];
+    list.push(n);
+    children.set(n.parentId, list);
+  }
+  const leads = new Map<string, Assessment>();
+  for (const a of Object.values(state.assessments)) if (a.nodeId) leads.set(a.nodeId, a);
+  const findings = new Map<string, number>();
+  for (const f of Object.values(state.findings)) for (const id of f.nodeIds ?? []) findings.set(id, (findings.get(id) ?? 0) + 1);
+  const label = (id?: string) => (id ? state.nodes[id]?.label ?? "" : "");
+  const kids = (id: string, category: string) => (children.get(id) ?? []).filter((c) => c.category === category);
+
+  const base = (n: MapNode): Row => ({
+    id: n.id,
+    order: orderOf.get(n.id) ?? 0,
+    label: n.label,
+    host: "",
+    endpoint: "",
+    status: n.status,
+    source: sourceOf(n),
+    count: 0,
+    requests: Number(n.meta?.requests ?? 0),
+    lead: leads.get(n.id),
+    findings: findings.get(n.id) ?? 0,
+  });
+
+  const nodes = Object.values(state.nodes);
+  if (show === "endpoints") {
+    return nodes.filter((n) => n.category === "endpoints").map((n) => ({ ...base(n), host: label(n.parentId), count: kids(n.id, "params").length }));
+  }
+  if (show === "hosts") {
+    return nodes.filter(isHost).map((n) => {
+      const eps = kids(n.id, "endpoints");
+      const best = eps.map((e) => leads.get(e.id)).reduce<Assessment | undefined>((b, a) => (leadScore(a) > leadScore(b) ? a : b), leads.get(n.id));
+      return {
+        ...base(n),
+        host: n.id.startsWith("host:") ? label(n.parentId) : "",
+        count: eps.length,
+        lead: best,
+        findings: eps.reduce((sum, e) => sum + (findings.get(e.id) ?? 0), findings.get(n.id) ?? 0),
+      };
+    });
+  }
+  return nodes
+    .filter((n) => n.category === "params")
+    .map((n) => {
+      const ep = n.parentId ? state.nodes[n.parentId] : undefined;
+      return { ...base(n), endpoint: ep?.label ?? "", host: label(ep?.parentId) };
+    });
+}

@@ -518,3 +518,45 @@ button.ghost:hover { border-color: var(--muted); color: var(--text-hi); }
   fill: none; stroke: var(--active); stroke-width: 1.2; stroke-dasharray: 3 3;
   vector-effect: non-scaling-stroke; opacity: 0.85; animation: pulse 1.8s ease-in-out infinite;
 }
+
+/* ── Surface view (sortable attack-surface table) ── */
+.surface { display: flex; flex-direction: column; height: 100%; background: var(--panel); }
+.surface-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.surface-bar input {
+  background: var(--panel-2); border: 1px solid var(--line-hi); color: var(--text); border-radius: 2px;
+  padding: 3px 8px; font-family: var(--mono); font-size: 11px; width: 190px;
+}
+.surface-bar input:focus { outline: none; border-color: var(--accent); }
+.surface-bar .toggle {
+  background: transparent; color: var(--muted); border: 1px solid var(--line-hi); border-radius: 2px; cursor: pointer;
+  padding: 3px 10px; font-family: var(--cond); font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em;
+}
+.surface-bar .toggle:hover { color: var(--text); }
+.surface-bar .toggle.on { color: var(--active); border-color: var(--active); }
+.surface-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.surface-scroll { flex: 1; min-height: 0; overflow: auto; }
+.surface table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.surface th {
+  position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; white-space: nowrap; cursor: pointer; user-select: none;
+  padding: 6px 8px; border-bottom: 1px solid var(--line-hi);
+  font-family: var(--cond); font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted);
+}
+.surface th:hover { color: var(--text-hi); }
+.surface th.sorted { color: var(--accent); }
+.surface .sort-arrow { margin-left: 4px; font-size: 8px; }
+.surface td { padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.surface .num { text-align: right; font-variant-numeric: tabular-nums; }
+.surface td.target { font-family: var(--mono); color: var(--text-hi); }
+.surface td.mono { font-family: var(--mono); color: var(--text); }
+.surface .dim { color: var(--faint); }
+.surface tbody tr { cursor: pointer; }
+.surface tbody tr:hover td { background: var(--hover); }
+.surface tbody tr.selected td { background: #17212b; }
+.surface tbody tr.selected td:first-child { box-shadow: inset 2px 0 var(--accent); }
+.surface tbody tr.new td { animation: surface-new 2.2s ease-out; }
+@keyframes surface-new { from { background: rgba(232, 161, 58, 0.2); } to { background: transparent; } }
+.surface .lead-cell { display: inline-flex; align-items: center; gap: 8px; }
+.src { font-family: var(--cond); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; padding: 0 5px; border: 1px solid currentColor; border-radius: 2px; }
+.src.agent { color: var(--accent); }
+.src.proxy { color: #b98cf0; }
+.src.both { color: var(--complete); }

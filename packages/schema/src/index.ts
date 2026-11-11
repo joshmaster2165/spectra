@@ -397,7 +397,14 @@ export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
       break;
     case "node.upsert": {
       const prev = state.nodes[e.node.id];
-      next.nodes = { ...state.nodes, [e.node.id]: { ...prev, ...e.node } };
+      const node = { ...prev, ...e.node };
+      // Merge properties rather than replace them, so traffic stats survive agent updates.
+      if (prev?.meta && e.node.meta) node.meta = { ...prev.meta, ...e.node.meta };
+      // Surface first seen in proxy traffic that the agent now touches is seen in both.
+      if (prev && node.meta?.["seen in"] === "proxy traffic" && e.source !== "proxy") {
+        node.meta = { ...node.meta, "seen in": "agent and proxy traffic" };
+      }
+      next.nodes = { ...state.nodes, [e.node.id]: node };
       if (e.node.parentId) {
         const id = `${e.node.parentId}->${e.node.id}`;
         next.edges = {

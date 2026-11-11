@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SEVERITY_RANK, type Assessment, type Finding, type FindingAssessment, type GraphState, type Review } from "@spectra/schema";
 import { Segmented } from "../components/Panel.tsx";
+import { Confidence } from "../components/Status.tsx";
 import { clock, formatTool } from "../format.ts";
 
 export type OversightTab = "findings" | "navigator" | "scope";
@@ -203,15 +204,6 @@ function ReviewForm({ finding }: { finding: Finding }) {
         {error && <span className="alert-text">{error}</span>}
       </div>
     </div>
-  );
-}
-
-function Confidence({ value = 0 }: { value?: number }) {
-  return (
-    <span className="conf" title={`confidence ${Math.round(value * 100)}%`}>
-      <span className="conf-bar"><i style={{ width: `${value * 100}%` }} /></span>
-      <span>{Math.round(value * 100)}%</span>
-    </span>
   );
 }
 

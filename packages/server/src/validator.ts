@@ -34,7 +34,7 @@ const WS_URL = HUB.replace(/^http/, "ws") + "/ws";
 const MODEL = process.env.SPECTRA_VALIDATOR_MODEL ?? "claude-opus-5-5";
 const IDLE_MS = Number(process.env.SPECTRA_VALIDATOR_IDLE_MS ?? 2500);
 const MIN_GAP_MS = 15_000;
-const MAX_NODES = 120;
+const MAX_NODES = 200;
 
 const RECS: Recommendation[] = ["pursue", "watch", "skip"];
 const VERDICTS = ["corroborated", "unconvinced", "needs-evidence"] as const;
@@ -102,8 +102,13 @@ function digest(s: GraphState): string {
   }
   lines.push("");
 
-  const nodes = Object.values(s.nodes).slice(0, MAX_NODES);
-  lines.push(`Map — ${nodes.length} nodes:`);
+  // Over the cap, keep the attack surface (newest first) ahead of files, searches and commands.
+  const SURFACE = new Set(["hosts", "endpoints", "params"]);
+  const all = Object.values(s.nodes);
+  const surface = all.filter((n) => SURFACE.has(n.category ?? "")).reverse();
+  const rest = all.filter((n) => !SURFACE.has(n.category ?? "")).reverse();
+  const nodes = [...surface, ...rest].slice(0, MAX_NODES);
+  lines.push(all.length > nodes.length ? `Map — ${nodes.length} of ${all.length} nodes (attack surface first, newest first):` : `Map — ${nodes.length} nodes:`);
   for (const n of nodes) {
     const seenIn = n.meta?.["seen in"];
     const traffic = seenIn && `seen in ${seenIn}, ${n.meta?.requests} req${n.meta?.["status codes"] ? `, status ${n.meta["status codes"]}` : ""}`;

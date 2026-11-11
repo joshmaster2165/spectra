@@ -39,7 +39,11 @@ server.tool(
   "map_target",
   "Add or update a target on the attack-surface map: an asset you discovered — a host, subdomain, API endpoint, parameter, or module. Link it to a parent to build the surface tree (domain → subdomain → endpoint → parameter).",
   {
-    id: z.string().describe("Stable id, e.g. 'endpoint:/api/login'"),
+    id: z
+      .string()
+      .describe(
+        "Stable id. Use the hub's conventions so it merges with observed traffic: 'domain:<apex>', 'host:<hostname>', 'endpoint:<hostname><route>' (e.g. 'endpoint:api.example.test/v1/users/:id'), 'param:<hostname><route>?<name>'",
+      ),
     label: z.string(),
     kind: z.enum(["root", "category", "leaf"]).default("leaf"),
     status: z.enum(["unexplored", "active", "complete"]).default("active"),

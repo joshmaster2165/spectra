@@ -12,16 +12,18 @@ import { ChainBuilder } from "./modules/ChainBuilder.tsx";
 import { ExplorationSketch } from "./modules/ExplorationSketch.tsx";
 import { Oversight, type OversightTab } from "./modules/Oversight.tsx";
 import { FilesView } from "./modules/FilesView.tsx";
+import { SurfaceTable } from "./modules/SurfaceTable.tsx";
 import { downloadReport } from "./report.ts";
 import { AuditStatus } from "./components/AuditStatus.tsx";
 import { ImportButton } from "./components/ImportButton.tsx";
 import { clock } from "./format.ts";
 
-type View = "network" | "hierarchy" | "files" | "node";
+type View = "network" | "hierarchy" | "surface" | "files" | "node";
 
 const VIEWS: { value: View; label: string }[] = [
   { value: "network", label: "Graph" },
   { value: "hierarchy", label: "Tree" },
+  { value: "surface", label: "Surface" },
   { value: "files", label: "Files" },
   { value: "node", label: "Target" },
 ];
@@ -104,6 +106,7 @@ export function App() {
         >
           {view === "network" && <GlobalMap state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
           {view === "hierarchy" && <TreeView state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
+          {view === "surface" && <SurfaceTable state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
           {view === "files" && <FilesView state={state} />}
           {view === "node" && <NodeView state={state} nodeId={selected} onSelect={setSelected} />}
         </Panel>
