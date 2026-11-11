@@ -7,6 +7,7 @@ import {
   applyEvent,
   emptyState,
   HUB_ONLY_EVENTS,
+  VALIDATOR_ONLY_EVENTS,
   type GraphState,
   type Scope,
   type ScopeViolation,
@@ -57,6 +58,7 @@ const MIME: Record<string, string> = {
  *   GET  /verify?session   check that session's hash-chained audit log
  *   POST /hooks            raw Claude Code hook payload (bin/spectra-hook.mjs)
  *   POST /events           agent/demo annotations (MCP server, demo script)
+ *   POST /validator        Navigator leads and finding verdicts (validator process)
  *   POST /scope            operator sets the scope { paths, hosts }
  *   POST /review           operator verdict on a finding { findingId, verdict, note }
  *   GET  /files            files under the scope paths, for review coverage
@@ -325,12 +327,19 @@ export class Hub {
             this.ingestHook(body);
           } else if (url.pathname === "/events") {
             for (const e of Array.isArray(body) ? body : [body]) {
-              if (HUB_ONLY_EVENTS.includes(e?.type)) continue;
+              // Agent/demo annotations can't speak as the hub or the Navigator.
+              if (HUB_ONLY_EVENTS.includes(e?.type) || VALIDATOR_ONLY_EVENTS.includes(e?.type)) continue;
               // External callers can only speak as the agent (mcp) or the demo.
               const source = e.source === "demo" ? "demo" : "mcp";
               const event = { ts: Date.now(), ...e, source } as SpectraEvent;
               if (event.type === "finding.upsert") event.finding = { ...event.finding, reportedBy: source };
               this.publish(event);
+            }
+          } else if (url.pathname === "/validator") {
+            // Only the Navigator speaks here, and only in leads and finding verdicts.
+            for (const e of Array.isArray(body) ? body : [body]) {
+              if (!VALIDATOR_ONLY_EVENTS.includes(e?.type)) continue;
+              this.publish({ ts: Date.now(), ...e, source: "validator" } as SpectraEvent);
             }
           } else if (url.pathname === "/scope") {
             this.setScope(makeScope({ paths: body.paths, hosts: body.hosts }, "config"));

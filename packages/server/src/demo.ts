@@ -87,4 +87,39 @@ for (const step of script) {
   });
   await sleep(500);
 }
+
+// The Navigator's take — scored leads and finding verdicts the validator process
+// would normally produce. Posted to /validator so they're labelled `validator`.
+const nav: any[] = [
+  {
+    type: "assessment.upsert",
+    assessment: { id: "nav:r:/api/cart", nodeId: "r:/api/cart", title: "Cart authorization boundary", bugClass: "idor", confidence: 0.82, recommendation: "pursue", rationale: "Reads a user id from an unsigned cookie — classic IDOR surface, and already load-bearing in the chain." },
+  },
+  {
+    type: "assessment.upsert",
+    assessment: { id: "nav:r:/api/orders", nodeId: "r:/api/orders", title: "Orders endpoint", bugClass: "idor", confidence: 0.45, recommendation: "watch", rationale: "Unexplored; the same cookie-trust pattern may repeat here. Worth a look once cart is confirmed." },
+  },
+  {
+    type: "assessment.upsert",
+    assessment: { id: "nav:r:/api/login", nodeId: "r:/api/login", title: "Login handler", bugClass: "authn", confidence: 0.3, recommendation: "watch", rationale: "Issues the session cookie; the signing secret and verification path are the thing to trace." },
+  },
+  {
+    type: "finding.assessment",
+    findingId: "F-1",
+    assessment: { verdict: "corroborated", confidence: 0.86, rationale: "Chain holds: login sets the cookie, cart reads uid without verifying its signature. High severity is justified." },
+  },
+  {
+    type: "finding.assessment",
+    findingId: "F-2",
+    assessment: { verdict: "needs-evidence", confidence: 0.4, rationale: "No supporting chain step or observed probe yet — the rate-limit claim is unverified." },
+  },
+];
+for (const e of nav) {
+  await fetch(`${HUB}/validator`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...e, sessionId, ts: Date.now() }),
+  });
+  await sleep(300);
+}
 console.log(`[spectra] demo complete (session ${sessionId})`);

@@ -18,7 +18,7 @@ export type Importance = 1 | 2 | 3 | 4 | 5;
  * Where an event came from. hook/observer are ground truth (what Claude Code
  * actually did); mcp/demo are claims made by the agent or a script.
  */
-export type EventSource = "hook" | "observer" | "mcp" | "demo" | "hub" | "operator";
+export type EventSource = "hook" | "observer" | "mcp" | "demo" | "hub" | "operator" | "validator";
 
 export interface MapNode {
   id: string;
@@ -144,6 +144,8 @@ export interface Finding {
   /** Session the finding was reported in. */
   sessionId?: string;
   review?: Review;
+  /** The Navigator's independent read on this finding, separate from the operator's review. */
+  assessment?: FindingAssessment;
   /** Edits to the finding's file, linked by the hub. */
   edits?: FixEdit[];
 }
@@ -153,6 +155,40 @@ export interface FileTouch {
   reads: number;
   writes: number;
   lastTs: number;
+}
+
+/* ── Navigator (the validator in the second seat) ──────── */
+
+/** What the Navigator makes of a lead: chase it, keep it in view, or leave it. */
+export type Recommendation = "pursue" | "watch" | "skip";
+
+/**
+ * The Navigator's independent read on a map area — a scored lead. A second AI,
+ * reading the same map the operator sees, points at where the promise is. It is
+ * advice, never authority: the driver acts, the operator decides.
+ */
+export interface Assessment {
+  id: string;
+  /** The map node (or cluster root) this lead points at. */
+  nodeId?: string;
+  title: string;
+  /** One or two lines: why this is (or isn't) worth the driver's time. */
+  rationale?: string;
+  /** Suspected bug class, e.g. "idor", "authz", "injection", "ssrf". */
+  bugClass?: string;
+  /** 0–1 promise score. */
+  confidence: number;
+  recommendation: Recommendation;
+  ts: number;
+}
+
+/** The Navigator's verdict on a driver-reported finding. */
+export interface FindingAssessment {
+  verdict: "corroborated" | "unconvinced" | "needs-evidence";
+  /** 0–1 confidence in the verdict. */
+  confidence: number;
+  rationale?: string;
+  ts: number;
 }
 
 /* ── Events ────────────────────────────────────────────── */
@@ -184,12 +220,17 @@ export type SpectraEvent =
   | (Base & { type: "scope.violation"; violation: ScopeViolation })
   | (Base & { type: "finding.upsert"; finding: Finding })
   | (Base & { type: "finding.review"; findingId: string; review: Review })
-  | (Base & { type: "finding.edit"; findingId: string; edit: FixEdit });
+  | (Base & { type: "finding.edit"; findingId: string; edit: FixEdit })
+  | (Base & { type: "assessment.upsert"; assessment: Assessment })
+  | (Base & { type: "finding.assessment"; findingId: string; assessment: FindingAssessment });
 
 export type SpectraEventType = SpectraEvent["type"];
 
 /** Event types only the hub itself may produce; rejected from POST /events. */
 export const HUB_ONLY_EVENTS: SpectraEventType[] = ["scope.set", "scope.violation", "finding.review", "finding.edit"];
+
+/** Only the Navigator (via the hub's /validator endpoint) may produce these; rejected from POST /events. */
+export const VALIDATOR_ONLY_EVENTS: SpectraEventType[] = ["assessment.upsert", "finding.assessment"];
 
 export interface GraphState {
   sessionId?: string;
@@ -197,6 +238,8 @@ export interface GraphState {
   edges: Record<string, MapEdge>;
   chain: Record<string, ChainStep>;
   findings: Record<string, Finding>;
+  /** The Navigator's leads, keyed by assessment id. */
+  assessments: Record<string, Assessment>;
   scope?: Scope;
   violations: ScopeViolation[];
   /** Absolute path → how the agent touched it */
@@ -223,7 +266,7 @@ export const TIMELINE_LIMIT = 500;
 export const SEVERITY_RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
 export function emptyState(): GraphState {
-  return { nodes: {}, edges: {}, chain: {}, findings: {}, violations: [], files: {}, counts: { toolCalls: 0, failed: 0 }, timeline: [] };
+  return { nodes: {}, edges: {}, chain: {}, findings: {}, assessments: {}, violations: [], files: {}, counts: { toolCalls: 0, failed: 0 }, timeline: [] };
 }
 
 /** Pure reducer shared by the hub, the live dashboard and replay. */
@@ -289,6 +332,17 @@ export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
     case "finding.edit": {
       const f = state.findings[e.findingId];
       if (f) next.findings = { ...state.findings, [f.id]: { ...f, edits: [...(f.edits ?? []), e.edit] } };
+      break;
+    }
+    case "assessment.upsert":
+      next.assessments = {
+        ...state.assessments,
+        [e.assessment.id]: { ...state.assessments[e.assessment.id], ...e.assessment },
+      };
+      break;
+    case "finding.assessment": {
+      const f = state.findings[e.findingId];
+      if (f) next.findings = { ...state.findings, [f.id]: { ...f, assessment: e.assessment } };
       break;
     }
     case "tool.call": {

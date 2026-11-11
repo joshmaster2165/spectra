@@ -7,10 +7,12 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "mcp": "tsx src/mcp.ts",
+    "validator": "tsx src/validator.ts",
     "demo": "tsx src/demo.ts",
     "verify": "tsx src/verify.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@spectra/schema": "*",
     "ws": "^8.18.0",

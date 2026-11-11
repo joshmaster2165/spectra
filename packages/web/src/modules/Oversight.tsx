@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { SEVERITY_RANK, type Finding, type GraphState, type Review } from "@spectra/schema";
+import { SEVERITY_RANK, type Assessment, type Finding, type FindingAssessment, type GraphState, type Review } from "@spectra/schema";
 import { Segmented } from "../components/Panel.tsx";
 import { clock, formatTool } from "../format.ts";
 
-export type OversightTab = "findings" | "scope";
+export type OversightTab = "findings" | "navigator" | "scope";
 
 const VERDICT_LABEL: Record<Review["verdict"], string> = { verified: "Verified", rejected: "Rejected", "needs-info": "Needs info" };
+const NAV_VERDICT_LABEL: Record<FindingAssessment["verdict"], string> = { corroborated: "Corroborated", unconvinced: "Unconvinced", "needs-evidence": "Needs evidence" };
+const REC_LABEL: Record<Assessment["recommendation"], string> = { pursue: "Pursue", watch: "Watch", skip: "Skip" };
+const REC_RANK: Record<Assessment["recommendation"], number> = { pursue: 0, watch: 1, skip: 2 };
 
 /** Findings ranked by severity/confidence with their evidence trail, plus scope status and violations. */
 export function Oversight({
@@ -20,6 +23,7 @@ export function Oversight({
   onSelect: (id: string) => void;
 }) {
   const findings = Object.values(state.findings);
+  const leadCount = Object.keys(state.assessments).length;
   return (
     <div className="ledger-body">
       <Segmented
@@ -27,11 +31,49 @@ export function Oversight({
         onChange={onTab}
         options={[
           { value: "findings", label: `Findings ${findings.length || ""}`.trim() },
+          { value: "navigator", label: `Navigator ${leadCount || ""}`.trim() },
           { value: "scope", label: `Scope ${state.violations.length ? `· ${state.violations.length}` : ""}`.trim() },
         ]}
       />
-      {tab === "findings" ? <Findings state={state} onSelect={onSelect} /> : <ScopeView state={state} onSelect={onSelect} />}
+      {tab === "findings" && <Findings state={state} onSelect={onSelect} />}
+      {tab === "navigator" && <Navigator state={state} onSelect={onSelect} />}
+      {tab === "scope" && <ScopeView state={state} onSelect={onSelect} />}
     </div>
+  );
+}
+
+/** The Navigator's leads: a second model's scored read on where the promise is. */
+function Navigator({ state, onSelect }: { state: GraphState; onSelect: (id: string) => void }) {
+  const leads = Object.values(state.assessments).sort(
+    (a, b) => REC_RANK[a.recommendation] - REC_RANK[b.recommendation] || (b.confidence ?? 0) - (a.confidence ?? 0),
+  );
+  if (!leads.length)
+    return (
+      <div className="empty">
+        No leads yet. Start the Navigator with <code>npm run validator</code> to have a second model score the map and point at what's worth pursuing.
+      </div>
+    );
+  return (
+    <ul className="leads">
+      {leads.map((l) => {
+        const node = l.nodeId ? state.nodes[l.nodeId] : undefined;
+        return (
+          <li key={l.id} className={`lead ${l.recommendation}`} onClick={() => l.nodeId && onSelect(l.nodeId)}>
+            <div className="lead-row">
+              <span className={`rec ${l.recommendation}`}>{REC_LABEL[l.recommendation]}</span>
+              <span className="lead-title">{l.title}</span>
+              <Confidence value={l.confidence} />
+            </div>
+            <div className="lead-sub">
+              {l.bugClass && <span className="bugclass">{l.bugClass}</span>}
+              {node && <code>{node.label}</code>}
+              {node?.outOfScope && <span className="oob-tag">out of scope</span>}
+            </div>
+            {l.rationale && <p className="lead-rationale">{l.rationale}</p>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -66,6 +108,11 @@ function Findings({ state, onSelect }: { state: GraphState; onSelect: (id: strin
             <span className="spacer" />
             <span className={`chip ${f.status === "confirmed" ? "complete" : f.status === "suspected" ? "active" : "unexplored"}`}>{f.status}</span>
             {f.reportedBy === "mcp" && <span className="claim" title="Reported by the agent; verify against the evidence">agent-reported</span>}
+            {f.assessment && (
+              <span className={`nav-verdict ${f.assessment.verdict}`} title={f.assessment.rationale}>
+                Navigator: {NAV_VERDICT_LABEL[f.assessment.verdict]} {Math.round(f.assessment.confidence * 100)}%
+              </span>
+            )}
             {f.review ? (
               <span className={`verdict ${f.review.verdict}`} title={f.review.note}>{VERDICT_LABEL[f.review.verdict]}</span>
             ) : (

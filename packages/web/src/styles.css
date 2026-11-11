@@ -439,3 +439,42 @@ button.ghost:hover { border-color: var(--muted); color: var(--text-hi); }
 .statusbar .audit.ok { color: var(--complete); }
 .statusbar .audit.ok:hover { text-decoration: underline; text-underline-offset: 2px; }
 .statusbar .audit.bad { color: var(--alert); font-weight: 500; }
+
+/* ── Navigator (the validator's leads) ───── */
+.leads { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+.lead { padding: 9px 12px; border-top: 1px solid var(--line); cursor: pointer; }
+.lead:first-child { border-top: 0; }
+.lead:hover { background: var(--hover); }
+.lead-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.lead-title { color: var(--text-hi); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 5px; padding-left: 58px; font-size: 11px; }
+.lead-rationale { margin: 6px 0 0; padding-left: 58px; color: var(--text); line-height: 1.45; font-size: 11.5px; }
+.lead.skip { opacity: 0.6; }
+
+.rec {
+  display: inline-block; min-width: 46px; text-align: center; padding: 1px 6px; border-radius: 2px;
+  font-family: var(--cond); font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
+  border: 1px solid currentColor;
+}
+.rec.pursue { color: var(--bg); background: var(--active); border-color: var(--active); }
+.rec.watch { color: var(--accent); }
+.rec.skip { color: var(--muted); }
+
+.bugclass {
+  font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--active); border: 1px solid rgba(232, 161, 58, 0.4); border-radius: 2px; padding: 0 5px;
+}
+.oob-tag { font-family: var(--cond); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--alert); }
+
+.nav-verdict {
+  font-family: var(--cond); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 0 5px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap;
+}
+.nav-verdict.corroborated { color: var(--complete); }
+.nav-verdict.unconvinced { color: var(--muted); }
+.nav-verdict.needs-evidence { color: var(--active); }
+
+.node .promise-ring {
+  fill: none; stroke: var(--active); stroke-width: 1.2; stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke; opacity: 0.85; animation: pulse 1.8s ease-in-out infinite;
+}

@@ -67,6 +67,13 @@ export function GlobalMap({
 
   if (!nodes.length) return <div className="empty">No objects. Start a Claude Code session or run <code>npm run demo</code>.</div>;
 
+  // Nodes the Navigator flagged as worth pursuing get a halo.
+  const promising = new Set(
+    Object.values(state.assessments)
+      .filter((a) => a.recommendation === "pursue" && a.nodeId)
+      .map((a) => a.nodeId as string),
+  );
+
   const xs = nodes.map((n) => n.x ?? 0);
   const ys = nodes.map((n) => n.y ?? 0);
   const minX = Math.min(...xs) - PAD;
@@ -93,7 +100,7 @@ export function GlobalMap({
       {nodes.map((n) => (
         <g
           key={n.id}
-          className={`node ${n.kind} ${n.status} ${n.outOfScope ? "oob" : ""} ${selected === n.id ? "selected" : ""}`}
+          className={`node ${n.kind} ${n.status} ${n.outOfScope ? "oob" : ""} ${promising.has(n.id) ? "promise" : ""} ${selected === n.id ? "selected" : ""}`}
           transform={`translate(${n.x},${n.y})`}
           onClick={() => onSelect(n.id)}
           onDoubleClick={() => onOpen(n.id)}
@@ -103,6 +110,7 @@ export function GlobalMap({
           ) : (
             <circle r={RADIUS[n.kind]} />
           )}
+          {promising.has(n.id) && <circle className="promise-ring" r={RADIUS[n.kind] + 6} />}
           {n.outOfScope && <circle className="oob-ring" r={RADIUS[n.kind] + 4} />}
           {selected === n.id && <circle className="ring" r={RADIUS[n.kind] + 7} />}
           {n.kind !== "leaf" || selected === n.id ? (
