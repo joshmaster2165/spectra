@@ -1,86 +1,94 @@
 <p align="center"><img src="docs/logo.svg" alt="Spectra — Analytics Engine" width="420"></p>
 
-# Spectra
+<p align="center">
+  <b>A live attack-surface map for authorized, AI-assisted bug hunting.</b><br>
+  Watch a Claude Code agent map hosts, subdomains, endpoints and parameters in real time —<br>
+  with a second AI scoring where to dig, and a hard line around what you authorized.
+</p>
 
-**A live attack-surface map for authorized, agent-assisted bug hunting.** Spectra turns a Claude Code agent's terminal stream into a local recon map showing:
-- the attack surface it mapped — hosts, subdomains, API endpoints and parameters,
-- the files, searches and commands behind that recon,
-- the attack chain behind each finding, with a second-AI validator scoring where to dig next,
-- anything it touched outside the scope you authorized.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-ff7a10"></a>
+  <img alt="Node 20+" src="https://img.shields.io/badge/node-20%2B-3c873a">
+  <img alt="Works with Claude Code" src="https://img.shields.io/badge/works%20with-Claude%20Code-d97757">
+  <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20local-4b535d">
+</p>
 
-Every session is recorded so you can replay it afterwards.
-
-![Spectra dashboard: network map, activity stream with an out-of-scope request flagged, ranked findings, reasoning chain and coverage](docs/dashboard.png)
-
-Spectra **observes; it never drives**. It doesn't send prompts, approve tools or run commands. The hook it installs prints nothing and always exits 0, so it can't block, change or noticeably slow a tool call.
-
-It's built for oversight of agent-assisted security work on targets you're authorized to test: your own code, a pentest engagement, or a bug bounty program within its published scope.
-
----
-
-## What you see
-
-| Panel | Shows |
-|---|---|
-| **Attack Surface → Graph** | Zoomable, pannable force-directed map of the surface the agent touched — hosts, subdomains, endpoints, parameters, files, searches and commands — each target drawn with a per-type icon. Scroll to zoom, drag to pan, click to inspect |
-| **Attack Surface → Tree** | Collapsible tree: session → category → target, including **domain → subdomain → API endpoint** |
-| **Attack Surface → Files** | Code-review coverage: every file in scope marked read, edited or never opened, with per-folder coverage and an "unopened only" filter |
-| **Attack Surface → Target** | One target in detail: properties, neighbours, every tool call that touched it, and any scope violations |
-| **Activity** | Live stream of tool calls, the agent's reasoning, and your prompts; out-of-scope calls are marked in red |
-| **Oversight → Findings** | Vulnerabilities the agent reported, ranked by status, severity and confidence. Each shows its attack chain, the validator's verdict, the edits to the affected file, and your review |
-| **Oversight → Navigator** | The validator's scored leads — pursue / watch / skip, with suspected bug class and confidence — pointing at where the promise is |
-| **Oversight → Scope** | The authorized scope and every out-of-scope access (path or host, read / write / exec / network) |
-| **Chain** | How the agent linked smaller observations into an attack chain |
-| **Coverage** | Unmapped / active / confirmed counts and the discovery → linking → confirmed progression |
-| **Replay** | Scrub, step or play back any recorded session, with violations and findings marked on the timeline |
-| **Report** | Download a Markdown summary of the session: scope, findings with verdicts and remediation, violations, files edited |
-
-### Reviewing the agent's work
-
-- **Your verdict, kept separate.** Expand a finding to mark it *Verified*, *Rejected* or *Needs info* and add a note. The agent's own status ("confirmed", "fixed") stays visible next to your verdict, and the agent can't set verdicts.
-- **Remediation.** When the agent edits the file named in a finding's location, the edit is linked to that finding automatically.
-- **What wasn't checked.** The Files view lists every file in scope, including the ones the agent never opened, so gaps in the review are visible.
-- **Alerts.** Each out-of-scope access sends a desktop notification (macOS and Linux; bursts are grouped, at most one every 5 seconds), and the browser tab title shows the violation count.
-
-### How recon shows up
-
-Every URL the agent requests is added to the **hosts** tree. That covers WebFetch, browser MCP tools, and `curl`/`wget` URLs inside shell commands.
-
-```
-hosts
-└─ example-shop.test
-   ├─ api.example-shop.test
-   │  ├─ /v1/users/:id
-   │  ├─ /v1/users/:id/orders
-   │  └─ /v1/orders/:id
-   └─ admin.example-shop.test
-      └─ /login
-```
-
-Numeric IDs, UUIDs and long hex strings are collapsed to `:id`, so the API's shape shows up instead of thousands of one-off URLs.
-
-Spectra maps what the agent *touched*; it doesn't read tool output. Subdomains or routes the agent *discovers* (for example in a scanner's output) appear when the agent records them with the MCP tools below.
+![Spectra: the attack-surface graph for acme-shop.test with the out-of-scope production request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](docs/dashboard.png)
 
 ---
 
-## Install
+## Three seats, one target
 
-**Requirements:** Node.js 20+, Claude Code, macOS or Linux (Windows works through WSL).
+AI agents are good at recon and bad at telling you what they did. Spectra puts the work on a map and gives every role its own seat:
 
-### 1. Clone and start the dashboard
+```mermaid
+flowchart LR
+    D["🧭 <b>Driver</b><br/>Claude Code<br/><i>acts on the target</i>"]
+    N["🔭 <b>Navigator</b><br/>second AI, read-only<br/><i>scores leads, checks findings</i>"]
+    O["🧑‍💻 <b>Operator</b><br/>you<br/><i>sets scope, decides</i>"]
+    S[("Spectra hub<br/>attack-surface map<br/>+ audit log")]
+    D -- "every tool call" --> S
+    S -- "same map you see" --> N
+    N -- "leads + verdicts" --> S
+    S -- "live dashboard" --> O
+    O -- "scope + review" --> S
+```
+
+- **The driver acts.** Claude Code does the testing. Spectra records every file it reads, command it runs and URL it requests — but **never drives**: it sends no prompts, approves no tools, and its hook can't block or slow a call.
+- **The Navigator advises.** An optional second model reads the same map and points at the promise — *pursue / watch / skip*, a suspected bug class, a confidence score — and gives an independent verdict on each finding. It never touches the target.
+- **You decide.** You set the scope, review findings, and see instantly when anything crosses the line.
+
+## Quick start
 
 ```bash
 git clone https://github.com/joshmaster2165/spectra.git
-cd spectra
-npm install
-npm start
+cd spectra && npm install
+npm start          # dashboard on http://127.0.0.1:4317
+npm run demo       # in a second terminal: a scripted engagement against acme-shop.test
 ```
 
-Open **http://127.0.0.1:4317**. Leave this terminal running; the dashboard updates live.
+The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then [connect a real session](#connect-claude-code).
 
-### 2. Set your scope
+## What you get
 
-Copy the example config and list the folders and hosts the agent is allowed to touch:
+**Map the attack surface**
+- A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools.
+- Every URL becomes a **domain → subdomain → endpoint** tree; numeric IDs, UUIDs and hashes collapse to `:id`, so you see the API's shape, not ten thousand one-off URLs.
+- Code-review coverage: every in-scope file marked read, edited or **never opened**.
+
+**Stay inside the lines**
+- You define the scope (paths and hosts). Every out-of-scope read, write, exec or network call is flagged in red, with a desktop alert.
+- The agent has no tool to change scope or verdicts, and the hub rejects them on its annotation channel.
+
+**Get a second opinion**
+- The **Navigator** ranks leads by promise and corroborates or challenges each finding — shown beside the agent's own claim and your review, never mixed with them.
+
+**Prove what happened**
+- Findings carry their attack chain, the edits that fixed them, and your verdict.
+- Replay any session; export a Markdown report.
+- A **hash-chained audit log** makes after-the-fact edits detectable.
+
+## Spectra vs. an intercepting proxy
+
+Spectra is not Burp, Caido or ZAP, and doesn't try to be. They show you **traffic**; Spectra shows you **the agent**.
+
+| | Intercepting proxy | Spectra |
+|---|---|---|
+| Sees | Every request and response on the wire | Every action the agent takes: files, commands, searches, requests, its reasoning |
+| Answers | *What did the server say?* | *What did the agent do, why, and did it stay in scope?* |
+| Modifies traffic | Yes — intercept, replay, fuzz | Never — observe only |
+| Second opinion | — | The Navigator scores leads and findings |
+| Evidence | Request history | Hash-chained audit log of the whole engagement |
+
+They're complementary: run the agent through your proxy and watch it in Spectra. Feeding proxy history *into* the map is on the [roadmap](#roadmap).
+
+---
+
+## Setup
+
+**Requirements:** Node.js 20+, Claude Code, macOS or Linux (Windows through WSL).
+
+### Set your scope
 
 ```bash
 cp spectra.config.example.json spectra.config.json
@@ -98,37 +106,29 @@ cp spectra.config.example.json spectra.config.json
 - Hosts include their subdomains (`example-shop.test` covers `api.example-shop.test`).
 - `localhost`, `127.0.0.1` and `::1` are always in scope.
 - With no config, each session's working directory is its scope and every non-local host is flagged.
-- Restart `npm start` after editing.
-
-You can also change scope while it's running:
+- Restart `npm start` after editing, or change it live:
 
 ```bash
-curl -X POST http://127.0.0.1:4317/scope -H 'content-type: application/json' -d '{"paths":["/Users/you/code/target-repo"],"hosts":["example-shop.test"]}'
+curl -X POST http://127.0.0.1:4317/scope -H 'content-type: application/json' \
+  -d '{"paths":["/Users/you/code/target-repo"],"hosts":["example-shop.test"]}'
 ```
 
-The agent has no tool to change the scope or review verdicts, and Spectra rejects those events when they're sent the way the agent sends annotations.
+### Connect Claude Code
 
-### 3. Connect Claude Code
-
-**Hooks (recommended)** report every tool call the moment it happens. Install them for one project:
+**Hooks (recommended)** report every tool call the moment it happens:
 
 ```bash
-npm run hooks:install -- /path/to/target-repo
+npm run hooks:install -- /path/to/target-repo   # one project
+npm run hooks:install -- --user                 # every project
 ```
 
-This adds Spectra's hooks to `/path/to/target-repo/.claude/settings.local.json` and keeps your existing settings. To watch every project instead:
+This merges Spectra's hooks into `.claude/settings.local.json` (or your user settings) and keeps what's there. Add `--remove` to undo. Restart running Claude Code sessions afterwards.
 
-```bash
-npm run hooks:install -- --user
-```
+**No hooks?** Spectra also tails Claude Code's session logs in `~/.claude/projects/`. Hooks are more reliable — the log format isn't a public API.
 
-To remove them, add `--remove` to either command. Restart any running Claude Code sessions after installing.
+### Let the agent annotate the map (optional)
 
-**No hooks?** Spectra also tails Claude Code's session logs in `~/.claude/projects/`, so you'll see activity without them. Hooks are more reliable because the log format isn't a public API.
-
-### 4. (Optional) Let the agent annotate the map
-
-Register the MCP server so the agent can record what it discovers and report findings:
+Spectra maps what the agent *touched*. To also map what it *discovers* — a subdomain in scanner output, a parameter in a JS bundle — register the MCP server:
 
 ```bash
 claude mcp add spectra -- npx tsx "$(pwd)/packages/server/src/mcp.ts"
@@ -136,99 +136,71 @@ claude mcp add spectra -- npx tsx "$(pwd)/packages/server/src/mcp.ts"
 
 | Tool | Use |
 |---|---|
-| `map_target` | Add a discovered target (host, subdomain, endpoint, parameter, module) to the attack-surface map |
+| `map_target` | Add a discovered target (host, subdomain, endpoint, parameter, module) to the map |
 | `link_nodes` | Connect two targets with a labelled edge |
 | `update_chain` | Add a step to the attack chain behind a finding |
 | `report_finding` | Report a vulnerability: severity, confidence, status, file/line, supporting steps |
 | `log_thought` | Explain a change of direction |
 
-Anything reported this way is labelled **agent-reported** in the dashboard. Treat it as the agent's claim and check it against the evidence; the hooks and logs record what actually ran.
-
-A line like this in the project's `CLAUDE.md` helps the agent use them:
+Anything reported this way is labelled **agent-reported** — a claim to check, not ground truth. This line in the project's `CLAUDE.md` helps:
 
 > Record discovered hosts, subdomains, endpoints and parameters with `map_target`, and report suspected vulnerabilities with `report_finding`, linking the attack-chain steps that support them.
 
-### 5. Try it without an agent
-
-```bash
-npm run demo
-```
-
-This plays a scripted audit session with a confirmed finding, a scope violation, and the Navigator's leads.
-
----
-
-## The Navigator — a validator in the second seat
-
-The Navigator is an optional second AI that reads the same map you do and advises on where the authorized bug hunting is promising. It connects to the hub as a **read-only** consumer — like the dashboard — rebuilds the attack-surface state, and asks a model to score it into **leads** (pursue / watch / skip, with a suspected bug class and confidence) and to give an **independent verdict** on each finding the agent reports. It never touches the target, and the hub won't let it set scope or operator verdicts.
+### Start the Navigator (optional)
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 npm run validator
 ```
 
-Its advice shows up in **Oversight → Navigator** (ranked leads), inline on each finding (its verdict, beside the agent's status and your review), and as a halo on the highest-promise targets in the graph. It gives **direction and prioritization only** — triage, not exploit payloads — and never promotes an out-of-scope target. Set `SPECTRA_VALIDATOR_MODEL` to change the model (default `claude-opus-5-5`).
+The Navigator connects to the hub as a read-only client, rebuilds the same state you see, and posts leads and verdicts back on its own endpoint — the agent's annotation tools can't produce them. It gives **direction and prioritization only** — triage, not exploit payloads — and never promotes an out-of-scope target. `SPECTRA_VALIDATOR_MODEL` picks the model (default `claude-opus-5-5`).
 
-> **Note:** the Navigator is the one part of Spectra that makes an outbound connection — to the Anthropic API. The hub itself still makes none. Leave it off if you don't want any egress.
+> The Navigator is the only part of Spectra that makes an outbound connection (to the Anthropic API). Leave it off for zero egress.
 
 ---
 
 ## How it works
 
+```mermaid
+flowchart LR
+    CC["Claude Code"] -- "hooks" --> H
+    CC -- "session logs" --> H
+    CC -- "MCP annotations" --> H
+    NAV["Navigator"] <-- "read-only state / leads" --> H
+    H["<b>Hub</b><br/>scope checks · dedupe<br/>hash-chained audit log"] -- "WebSocket" --> UI["Dashboard"]
 ```
-                 hooks  ── bin/spectra-hook.mjs ──POST /hooks──┐
- Claude Code ──┤  logs  ── ~/.claude/projects (observer) ──────┤
-                 MCP    ── src/mcp.ts ──────────POST /events──┤
-                                                               ▼
-                         Hub (packages/server): scope checks, dedupe, audit log
-                                                               │ WebSocket
-                                                               ▼
-                                         Dashboard (packages/web, React)
-```
+
+Every event carries its source, and sources are trusted differently:
 
 | Source | Provides | Trust |
 |---|---|---|
-| Hooks | Every tool call and result, in real time | What actually ran |
-| Log observer | The agent's reasoning text; tool calls when hooks aren't installed | What actually ran |
-| MCP server | Discoveries, chain steps, findings | The agent's claims |
+| Hooks · log observer | Every tool call and result, the agent's reasoning | **Ground truth** — what actually ran |
+| MCP server | Discoveries, chain steps, findings | **Claims** — the agent's word |
+| Navigator | Leads and finding verdicts | **Advice** — a second model's read |
+| Operator | Scope and review verdicts | **Authority** — yours alone |
 
-When a session reports through hooks, the log observer's copies of its tool calls are dropped so nothing is counted twice.
+**Scope checks.** Reads outside scope are *medium*; writes, shell execution and network access are *high*. Paths and URLs inside shell commands are found by pattern-matching and marked "parsed from shell" — a command that builds a path dynamically can slip past, so treat a clean scope tab as a strong signal, not a guarantee.
 
-**Scope checks:**
-- **Read** outside scope is *medium*.
-- **Write**, **shell (exec)** and **network** access outside scope are *high*.
-- Paths and URLs inside shell commands are found by pattern-matching and marked "parsed from shell". A command that builds a path dynamically can slip past it, so treat a clean scope tab as a strong signal, not a guarantee.
-
-**Audit log:** every event is appended to `~/.spectra/sessions/<session-id>.jsonl` with owner-only permissions. **Replay** in the top bar reads from it, so sessions survive restarts.
-
-### Tamper-evident log
-
-Each line of the audit log carries a sequence number, the previous line's hash and its own SHA-256 hash, so editing, deleting or reordering any line breaks the chain. The dashboard footer re-verifies the current session every 30 seconds and shows the **head hash** (click to copy); a failed check turns it red with the line number.
+**Tamper-evident log.** Every event is appended to `~/.spectra/sessions/<session-id>.jsonl` (owner-only), each line chained to the previous line's SHA-256. Editing, deleting or reordering a line breaks the chain. The footer re-verifies every 30 seconds and shows the **head hash**; exported reports include it, so a log rewritten later fails verification against the head you kept.
 
 ```bash
 npm run verify                         # check every recorded session
-npm run verify -- <session-id>         # check one
-npm run verify -- <session-id> <head>  # also confirm a head hash you recorded earlier
+npm run verify -- <session-id> <head>  # also confirm a head hash you recorded
 ```
-
-A chain alone can't stop someone who rewrites the *entire* file and recomputes every hash. That's what the head hash is for: each exported report includes it, so keep the report (or paste the hash into a ticket). If the log is rewritten later, `npm run verify -- <id> <head>` fails because the recorded head is no longer in the chain. Events appended after you recorded it still pass.
-
-### Repository layout
 
 ```
 packages/schema   Event types and the shared reducer (hub, dashboard and replay use the same one)
-packages/server   Hub, log observer, scope checks, MCP server, hook script and installer
-packages/web      Dashboard (React + Vite, d3-force)
+packages/server   Hub, log observer, scope checks, MCP server, Navigator, hook script and installer
+packages/web      Dashboard (React, Vite, d3-force)
 ```
-
----
 
 ## Security and privacy
 
-- **Everything stays on your machine.** The hub listens on 127.0.0.1 only and makes no outbound connections.
-- **Other websites can't read it.** The hub refuses requests and WebSocket connections from non-local browser origins, so a page you have open can't read the agent's activity.
-- **The audit log is sensitive.** It contains what the agent saw: file paths, command lines, URLs, your prompts and the agent's reasoning. The hook strips file contents and patches before sending, but treat the log like your shell history. Delete `~/.spectra/sessions` to clear it.
-- **Any local process can send events to the hub.** Agent annotations are labelled, and the hash-chained log makes after-the-fact edits detectable, but events injected *as they happen* would be chained like any other. Hooks and the log observer remain the record of what actually ran.
+- **Local only.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins.
+- **The audit log is sensitive.** It holds file paths, commands, URLs, your prompts and the agent's reasoning (file contents and patches are stripped). Treat it like shell history; delete `~/.spectra/sessions` to clear it.
+- **Any local process can post events.** Labels and the hash chain make claims and after-the-fact edits visible, but events injected live are chained like any other.
+
+Spectra is for testing you're **authorized** to do — your own code, a contracted engagement, or a bug bounty program within its published scope. See [SECURITY.md](SECURITY.md) for responsible use and how to report a vulnerability in Spectra itself.
 
 ## Configuration
 
@@ -240,9 +212,16 @@ packages/web      Dashboard (React + Vite, d3-force)
 | `SPECTRA_DATA_DIR` | `~/.spectra/sessions` | Audit log location |
 | `SPECTRA_PERSIST=0` | | Don't write the audit log |
 | `SPECTRA_OBSERVER=0` | | Don't read Claude Code's session logs |
-| `SPECTRA_NOTIFY=0` | | Turn off desktop notifications for scope violations |
-| `SPECTRA_REPLAY=1` | | Load existing session logs on start, not just new activity |
-| `SPECTRA_HUB` | `http://127.0.0.1:4317` | Where the hook, MCP server and demo send events |
+| `SPECTRA_NOTIFY=0` | | No desktop alerts for scope violations |
+| `SPECTRA_REPLAY=1` | | Load existing session logs on start |
+| `SPECTRA_HUB` | `http://127.0.0.1:4317` | Where the hook, MCP server, Navigator and demo connect |
+| `SPECTRA_VALIDATOR_MODEL` | `claude-opus-5-5` | Model the Navigator uses |
+
+## Roadmap
+
+- **Proxy ingest** — import Burp / Caido / ZAP history (HAR) and a passive mitmproxy add-on, so the map shows what responses *revealed*, not only what the agent touched. Ingest only: Spectra stays read-only.
+- **Response-aware recon** — opt-in extraction of links, routes and parameters from tool output.
+- **Report export** — findings with their attack chain and audit head hash, in bug-bounty report format.
 
 ## Development
 
@@ -253,4 +232,4 @@ npm run typecheck
 
 ## License
 
-MIT
+[MIT](LICENSE)

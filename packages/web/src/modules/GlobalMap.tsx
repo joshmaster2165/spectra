@@ -17,6 +17,12 @@ const RADIUS = { root: 13, category: 10, leaf: 8 } as const;
 const W = 900;
 const H = 600;
 const ZOOM = { min: 0.25, max: 6 } as const;
+/** Auto-fit never zooms past this, so small graphs don't render oversized. */
+const FIT_MAX = 1.4;
+/** Leaf labels show at this zoom; below it only the attack surface keeps its labels. */
+const LABEL_ZOOM = 1.7;
+/** Leaves that are the attack surface itself, labelled at any zoom. */
+const SURFACE = new Set(["endpoints", "params"]);
 
 /** Per-type glyphs, drawn in a 24×24 box (centred ~12,12), stroked in the node's status colour. */
 const ICONS: Record<string, string[]> = {
@@ -31,6 +37,7 @@ const ICONS: Record<string, string[]> = {
   domain: ["M4 12 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0", "M4 12 H20", "M12 4 C7 7 7 17 12 20", "M12 4 C17 7 17 17 12 20"],
   subdomain: ["M12 3 C15.3 3 18 5.7 18 9 C18 14 12 21 12 21 C12 21 6 14 6 9 C6 5.7 8.7 3 12 3 Z", "M9.5 9 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0"],
   endpoint: ["M9 4 C6 4 8 11 5 12 C8 13 6 20 9 20", "M15 4 C18 4 16 11 19 12 C16 13 18 20 15 20"],
+  params: ["M4 12.5 L11.5 5 H19 V12.5 L11.5 20 Z", "M14.9 9.1 a0.9 0.9 0 1 0 1.8 0 a0.9 0.9 0 1 0 -1.8 0"],
   other: ["M4 12 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0", "M12 9.5 V13", "M12 16 H12.01"],
 };
 
@@ -45,6 +52,7 @@ const LEGEND: { name: string; label: string }[] = [
   { name: "domain", label: "Domain" },
   { name: "subdomain", label: "Host" },
   { name: "endpoint", label: "Endpoint" },
+  { name: "params", label: "Param" },
 ];
 
 function iconFor(n: MapNode): string {
@@ -92,7 +100,8 @@ export function GlobalMap({
   const [panning, setPanning] = useState(false);
   const [legend, setLegend] = useState(false);
   const pan = useRef<{ x: number; y: number } | null>(null);
-  const didFit = useRef(false);
+  /** Auto-frame the graph as it grows, until the user zooms or pans; the fit button re-engages it. */
+  const follow = useRef(true);
 
   const { nodes, links } = useMemo(() => {
     const cache = nodesRef.current;
@@ -110,17 +119,6 @@ export function GlobalMap({
     return { nodes, links };
   }, [state.nodes, state.edges]);
 
-  useEffect(() => {
-    const sim = forceSimulation<SimNode>(nodes)
-      .force("link", forceLink<SimNode, SimLink>(links).id((d) => d.id).distance((l) => ((l.target as SimNode).kind === "leaf" ? 42 : 82)))
-      .force("charge", forceManyBody().strength(-160))
-      .force("center", forceCenter(W / 2, H / 2))
-      .force("collide", forceCollide<SimNode>((d) => RADIUS[d.kind] + 8))
-      .alpha(0.5)
-      .on("tick", () => setTick((t) => t + 1));
-    return () => void sim.stop();
-  }, [nodes, links]);
-
   const fit = () => {
     const ns = [...nodesRef.current.values()];
     if (!ns.length) return;
@@ -130,17 +128,31 @@ export function GlobalMap({
     const maxX = Math.max(...xs) + 50;
     const minY = Math.min(...ys) - 50;
     const maxY = Math.max(...ys) + 50;
-    const k = clamp(Math.min(W / (maxX - minX), H / (maxY - minY)), ZOOM.min, 2);
+    const k = clamp(Math.min(W / (maxX - minX), H / (maxY - minY)), ZOOM.min, FIT_MAX);
     setView({ k, x: W / 2 - (k * (minX + maxX)) / 2, y: H / 2 - (k * (minY + maxY)) / 2 });
   };
 
-  // Frame the graph once, after the first layout has had a moment to settle.
   useEffect(() => {
-    if (didFit.current || !nodes.length) return;
-    didFit.current = true;
-    const t = setTimeout(fit, 450);
-    return () => clearTimeout(t);
-  }, [nodes.length]);
+    let ticks = 0;
+    const sim = forceSimulation<SimNode>(nodes)
+      .force("link", forceLink<SimNode, SimLink>(links).id((d) => d.id).distance((l) => ((l.target as SimNode).kind === "leaf" ? 58 : 105)))
+      .force("charge", forceManyBody().strength(-280))
+      .force("center", forceCenter(W / 2, H / 2))
+      .force("collide", forceCollide<SimNode>((d) => RADIUS[d.kind] + 14))
+      .alpha(0.5)
+      .on("tick", () => {
+        setTick((t) => t + 1);
+        // While following, keep the moving layout framed.
+        if (follow.current && ++ticks % 20 === 0) fit();
+      })
+      .on("end", () => follow.current && fit());
+    // A first, early framing so the graph doesn't wait for the layout to finish.
+    const t = setTimeout(() => follow.current && fit(), 450);
+    return () => {
+      sim.stop();
+      clearTimeout(t);
+    };
+  }, [nodes, links]);
 
   // Wheel zoom toward the cursor. Native listener so we can preventDefault.
   useEffect(() => {
@@ -148,6 +160,7 @@ export function GlobalMap({
     if (!svg) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      follow.current = false;
       const { vx, vy } = clientToView(svg, e.clientX, e.clientY);
       setView((v) => {
         const k = clamp(v.k * Math.exp(-e.deltaY * 0.0015), ZOOM.min, ZOOM.max);
@@ -166,14 +179,22 @@ export function GlobalMap({
       .map((a) => a.nodeId as string),
   );
 
-  const zoomBy = (f: number) =>
+  const zoomBy = (f: number) => {
+    follow.current = false;
     setView((v) => {
       const k = clamp(v.k * f, ZOOM.min, ZOOM.max);
       return { k, x: W / 2 - (k * (W / 2 - v.x)) / v.k, y: H / 2 - (k * (H / 2 - v.y)) / v.k };
     });
+  };
+
+  const refit = () => {
+    follow.current = true;
+    fit();
+  };
 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if ((e.target as Element).closest(".node")) return; // let the node take the click
+    follow.current = false;
     pan.current = { x: e.clientX, y: e.clientY };
     setPanning(true);
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -226,7 +247,7 @@ export function GlobalMap({
           })}
           {nodes.map((n) => {
             const r = RADIUS[n.kind];
-            const showLabel = n.kind !== "leaf" || selected === n.id || view.k > 1.7;
+            const showLabel = n.kind !== "leaf" || selected === n.id || view.k > LABEL_ZOOM || SURFACE.has(n.category ?? "") || n.outOfScope;
             return (
               <g
                 key={n.id}
@@ -251,7 +272,7 @@ export function GlobalMap({
         <button onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">+</button>
         <span className="map-zoom-label">{Math.round(view.k * 100)}%</span>
         <button onClick={() => zoomBy(1 / 1.4)} title="Zoom out" aria-label="Zoom out">–</button>
-        <button onClick={fit} title="Fit to view" aria-label="Fit to view">⤢</button>
+        <button onClick={refit} title="Fit to view and follow new targets" aria-label="Fit to view">⤢</button>
         <button className={legend ? "on" : ""} onClick={() => setLegend((v) => !v)} title="Legend" aria-label="Toggle legend">?</button>
       </div>
 
