@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=Orbitron:wght@700&display=swap");
 
 :root {
   --bg: #08090b;
@@ -16,6 +16,8 @@
   --complete: #4fc39a;
   --accent: #8fb4d4;
   --alert: #e5534b;
+  /* Wordmark face, matched to the brand artwork's lettering. */
+  --brand-font: "Orbitron", "IBM Plex Sans Condensed", ui-sans-serif, sans-serif;
   --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --cond: "IBM Plex Sans Condensed", var(--sans);
   --mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -42,7 +44,7 @@ button { font: inherit; }
   background: var(--panel); border-bottom: 1px solid var(--line-hi);
 }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text-hi); }
-.wordmark { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: 0.42em; margin-right: -0.42em; }
+.wordmark { font-family: var(--brand-font); font-weight: 700; font-size: 12px; letter-spacing: 0.3em; margin-right: -0.3em; }
 .tagline { font-family: var(--cond); font-weight: 500; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); padding-left: 10px; border-left: 1px solid var(--line-hi); }
 .divider { width: 1px; height: 18px; background: var(--line-hi); }
 .field { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text); }
