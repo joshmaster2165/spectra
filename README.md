@@ -13,7 +13,8 @@
   <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20local-4b535d">
 </p>
 
-![Spectra: the attack-surface graph for acme-shop.test with the out-of-scope production request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](docs/dashboard.png)
+<p align="center"><img src="docs/demo.webp" alt="Spectra mapping a recon engagement: subdomain enumeration, live-host probing, API routes from an OpenAPI spec, admin content discovery and JS-bundle mining fill the attack-surface graph; one request to production lights up red; findings, proxy history and the Navigator's leads follow" width="100%"></p>
+<p align="center"><sub>A recon engagement against a fictional, authorized target — <code>npm run demo:recon</code> · <a href="docs/demo.mp4">full-quality MP4</a></sub></p>
 
 ---
 
@@ -45,11 +46,14 @@ git clone https://github.com/joshmaster2165/spectra.git
 cd spectra && npm install
 npm start          # dashboard on http://127.0.0.1:4317
 npm run demo       # in a second terminal: a scripted engagement against acme-shop.test
+npm run demo:recon # or the bigger one from the video: ~110 targets of recon
 ```
 
 The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then it imports a proxy history that reveals endpoints the agent never touched. Next, [connect a real session](#connect-claude-code) or [import your own proxy history](#import-proxy-history).
 
 ## What you get
+
+![Spectra: the attack-surface graph for acme-shop.test with the out-of-scope production request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](docs/dashboard.png)
 
 **Map the attack surface**
 - A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools.

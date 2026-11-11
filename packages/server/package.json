@@ -10,6 +10,7 @@
     "validator": "tsx src/validator.ts",
     "import": "tsx src/import.ts",
     "demo": "tsx src/demo.ts",
+    "demo:recon": "tsx src/demo-recon.ts",
     "verify": "tsx src/verify.ts"
   },
   "dependencies": {

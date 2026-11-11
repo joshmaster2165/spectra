@@ -5,6 +5,8 @@ import {
   forceLink,
   forceManyBody,
   forceSimulation,
+  forceX,
+  forceY,
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
@@ -105,6 +107,7 @@ export function GlobalMap({
   const pan = useRef<{ x: number; y: number } | null>(null);
   /** Auto-frame the graph as it grows, until the user zooms or pans; the fit button re-engages it. */
   const follow = useRef(true);
+  const lastFit = useRef(0);
 
   const { nodes, links } = useMemo(() => {
     const cache = nodesRef.current;
@@ -136,25 +139,26 @@ export function GlobalMap({
   };
 
   useEffect(() => {
-    let ticks = 0;
     const sim = forceSimulation<SimNode>(nodes)
       .force("link", forceLink<SimNode, SimLink>(links).id((d) => d.id).distance((l) => ((l.target as SimNode).kind === "leaf" ? 58 : 105)))
       .force("charge", forceManyBody().strength(-280))
       .force("center", forceCenter(W / 2, H / 2))
+      // A gentle pull to the middle keeps big maps compact; stronger vertically for the wide panel.
+      .force("x", forceX<SimNode>(W / 2).strength(0.03))
+      .force("y", forceY<SimNode>(H / 2).strength(0.07))
       .force("collide", forceCollide<SimNode>((d) => RADIUS[d.kind] + 14))
       .alpha(0.5)
       .on("tick", () => {
         setTick((t) => t + 1);
-        // While following, keep the moving layout framed.
-        if (follow.current && ++ticks % 20 === 0) fit();
+        // While following, keep the moving layout framed. Throttled by wall-clock time,
+        // because fast discovery restarts the layout long before it would settle.
+        if (follow.current && performance.now() - lastFit.current > 300) {
+          lastFit.current = performance.now();
+          fit();
+        }
       })
       .on("end", () => follow.current && fit());
-    // A first, early framing so the graph doesn't wait for the layout to finish.
-    const t = setTimeout(() => follow.current && fit(), 450);
-    return () => {
-      sim.stop();
-      clearTimeout(t);
-    };
+    return () => void sim.stop();
   }, [nodes, links]);
 
   // Wheel zoom toward the cursor. Native listener so we can preventDefault.
