@@ -15,6 +15,7 @@ export default defineConfig({
       "/files": HUB,
       "/review": HUB,
       "/verify": HUB,
+      "/import": HUB,
     },
   },
 });

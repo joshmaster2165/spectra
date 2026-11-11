@@ -9,6 +9,8 @@ import {
   HUB_ONLY_EVENTS,
   VALIDATOR_ONLY_EVENTS,
   type GraphState,
+  type HttpEntry,
+  type ImportSummary,
   type Scope,
   type ScopeViolation,
   type ServerMessage,
@@ -16,11 +18,14 @@ import {
   type SpectraEvent,
 } from "@spectra/schema";
 import { Translator } from "./toolmap.ts";
+import { importEntries } from "./har.ts";
 import { inScope, makeScope, severityOf, type ScopeConfig } from "./scope.ts";
 import { AuditLog } from "./audit.ts";
 
 const HISTORY_LIMIT = 50_000;
 const BODY_LIMIT = 1_000_000;
+/** Entries per /import request; clients send larger histories in chunks. */
+const IMPORT_LIMIT = 5_000;
 
 export interface HubOptions {
   scope: ScopeConfig;
@@ -59,6 +64,7 @@ const MIME: Record<string, string> = {
  *   POST /hooks            raw Claude Code hook payload (bin/spectra-hook.mjs)
  *   POST /events           agent/demo annotations (MCP server, demo script)
  *   POST /validator        Navigator leads and finding verdicts (validator process)
+ *   POST /import           proxy history { entries: HttpEntry[], label?, includeStatic? } → ImportSummary
  *   POST /scope            operator sets the scope { paths, hosts }
  *   POST /review           operator verdict on a finding { findingId, verdict, note }
  *   GET  /files            files under the scope paths, for review coverage
@@ -154,6 +160,26 @@ export class Hub {
         });
       }
     }
+  }
+
+  /** Proxy history onto the map, scope-filtered; joins the live session's record when there is one. */
+  importTraffic(raw: unknown[], opts: { label?: unknown; includeStatic?: unknown }): ImportSummary {
+    const entries: HttpEntry[] = [];
+    for (const e of raw.slice(0, IMPORT_LIMIT) as any[]) {
+      if (typeof e?.url !== "string" || e.url.length > 4096 || !/^https?:\/\//i.test(e.url)) continue;
+      entries.push({
+        method: typeof e.method === "string" ? e.method.toUpperCase().slice(0, 12) : "GET",
+        url: e.url.split(/[?#]/)[0], // never keep query values, whatever the client sent
+        status: Number.isInteger(e.status) ? e.status : undefined,
+        mime: typeof e.mime === "string" ? e.mime.slice(0, 100) : undefined,
+        params: Array.isArray(e.params) ? e.params.filter((p: unknown) => typeof p === "string").slice(0, 40).map((p: string) => p.slice(0, 80)) : undefined,
+      });
+    }
+    const label = typeof opts.label === "string" && opts.label.trim() ? opts.label.trim().slice(0, 80) : "proxy history";
+    const sessionId = this.state.sessionId ?? `import-${Date.now().toString(36)}`;
+    const { events, summary } = importEntries(this.state, entries, { sessionId, label, includeStatic: opts.includeStatic === true });
+    for (const e of events) this.publish(e);
+    return summary;
   }
 
   review(findingId: string, verdict: string, note?: string): boolean {
@@ -341,6 +367,9 @@ export class Hub {
               if (!VALIDATOR_ONLY_EVENTS.includes(e?.type)) continue;
               this.publish({ ts: Date.now(), ...e, source: "validator" } as SpectraEvent);
             }
+          } else if (url.pathname === "/import") {
+            if (!Array.isArray(body?.entries)) return void res.writeHead(400).end("expected { entries: [...] }");
+            return json(this.importTraffic(body.entries, body));
           } else if (url.pathname === "/scope") {
             this.setScope(makeScope({ paths: body.paths, hosts: body.hosts }, "config"));
           } else if (url.pathname === "/review") {

@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "mcp": "tsx src/mcp.ts",
     "validator": "tsx src/validator.ts",
+    "import": "tsx src/import.ts",
     "demo": "tsx src/demo.ts",
     "verify": "tsx src/verify.ts"
   },

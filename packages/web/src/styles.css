@@ -382,6 +382,20 @@ button.ghost {
 }
 button.ghost:hover { border-color: var(--muted); color: var(--text-hi); }
 .link.replaying { color: var(--active); }
+
+/* The top bar never wraps; lower-priority items drop out as it narrows. */
+.topbar > * { flex-shrink: 0; white-space: nowrap; }
+.topbar > .spacer, .topbar > .import-status { flex-shrink: 1; min-width: 0; }
+@media (max-width: 1280px) { .tagline, .clock { display: none; } }
+@media (max-width: 1100px) { .session-field, .session-field + .divider { display: none; } }
+
+/* Proxy import result, beside the Import HAR button. */
+.import-status {
+  max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+  background: rgba(79, 195, 154, 0.08); border: 1px solid rgba(79, 195, 154, 0.35); color: var(--complete);
+  border-radius: 2px; padding: 3px 9px; font-family: var(--mono); font-size: 10.5px;
+}
+.import-status.err { background: rgba(229, 83, 75, 0.08); border-color: rgba(229, 83, 75, 0.4); color: #f07f78; }
 .link.replaying .dot { background: var(--active); }
 .replay {
   display: flex; align-items: center; gap: 14px; height: 38px; padding: 0 16px; flex-shrink: 0;

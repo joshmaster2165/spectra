@@ -14,6 +14,7 @@ import { Oversight, type OversightTab } from "./modules/Oversight.tsx";
 import { FilesView } from "./modules/FilesView.tsx";
 import { downloadReport } from "./report.ts";
 import { AuditStatus } from "./components/AuditStatus.tsx";
+import { ImportButton } from "./components/ImportButton.tsx";
 import { clock } from "./format.ts";
 
 type View = "network" | "hierarchy" | "files" | "node";
@@ -58,7 +59,7 @@ export function App() {
           <span className="tagline">attack surface</span>
         </span>
         <span className="divider" />
-        <span className="field">
+        <span className="field session-field">
           <label>Session</label>
           <span>{state.sessionId ?? "Awaiting agent"}</span>
         </span>
@@ -71,6 +72,7 @@ export function App() {
           {violations > 0 && <span className="alert-pill">{violations} out of scope</span>}
         </button>
         <span className="spacer" />
+        {!replay.active && <ImportButton />}
         <button className="ghost" onClick={() => downloadReport(state)} title="Download a Markdown report of this session">
           Report
         </button>

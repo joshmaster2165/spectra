@@ -47,13 +47,14 @@ npm start          # dashboard on http://127.0.0.1:4317
 npm run demo       # in a second terminal: a scripted engagement against acme-shop.test
 ```
 
-The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then [connect a real session](#connect-claude-code).
+The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then it imports a proxy history that reveals endpoints the agent never touched. Next, [connect a real session](#connect-claude-code) or [import your own proxy history](#import-proxy-history).
 
 ## What you get
 
 **Map the attack surface**
 - A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools.
 - Every URL becomes a **domain → subdomain → endpoint** tree; numeric IDs, UUIDs and hashes collapse to `:id`, so you see the API's shape, not ten thousand one-off URLs.
+- **Import proxy history** (HAR from Burp, Caido, ZAP or browser devtools). Traffic merges onto the same map, and surface the agent never touched shows up as *unmapped* — a ready-made to-do list.
 - Code-review coverage: every in-scope file marked read, edited or **never opened**.
 
 **Stay inside the lines**
@@ -80,7 +81,7 @@ Spectra is not Burp, Caido or ZAP, and doesn't try to be. They show you **traffi
 | Second opinion | — | The Navigator scores leads and findings |
 | Evidence | Request history | Hash-chained audit log of the whole engagement |
 
-They're complementary: run the agent through your proxy and watch it in Spectra. Feeding proxy history *into* the map is on the [roadmap](#roadmap).
+They're complementary: run the agent through your proxy, watch it in Spectra, then [import the proxy's history](#import-proxy-history). Every endpoint the proxy saw lands on the same map, and anything the agent hasn't tested shows up as unmapped.
 
 ---
 
@@ -146,6 +147,19 @@ Anything reported this way is labelled **agent-reported** — a claim to check, 
 
 > Record discovered hosts, subdomains, endpoints and parameters with `map_target`, and report suspected vulnerabilities with `report_finding`, linking the attack-chain steps that support them.
 
+### Import proxy history
+
+Export your proxy's history as a HAR file — most proxies can, directly or through an extension, and any browser's DevTools can (*Network → Save all as HAR*). Then click **Import HAR** in the dashboard, or run:
+
+```bash
+npm run import -- burp-history.har          # several files at once is fine
+npm run import -- examples/acme-shop.har    # a sample to try
+```
+
+- **Same map, merged.** Endpoints use the same ids as the agent's traffic, so an endpoint the proxy saw and the agent touched is one node, marked *seen in agent and proxy traffic* with its request count, methods and status codes. Endpoints only the proxy saw arrive as **unmapped**, and the Navigator weighs them as untested leads.
+- **Scope-filtered.** Only hosts in your scope are imported; third-party hosts (CDNs, analytics) and static assets are skipped and listed, the way a proxy's "in-scope only" view works. Add `--include-static` to keep scripts, styles and images.
+- **Names, never values.** Parsing happens on your side (in the browser, or the CLI): only methods, URLs without their query strings, status codes, content types and parameter **names** are sent. Passwords, tokens and cookies never reach the hub, and token-like path segments collapse to `:token`.
+
 ### Start the Navigator (optional)
 
 ```bash
@@ -166,6 +180,7 @@ flowchart LR
     CC["Claude Code"] -- "hooks" --> H
     CC -- "session logs" --> H
     CC -- "MCP annotations" --> H
+    PX["Proxy history (HAR)"] -- "import" --> H
     NAV["Navigator"] <-- "read-only state / leads" --> H
     H["<b>Hub</b><br/>scope checks · dedupe<br/>hash-chained audit log"] -- "WebSocket" --> UI["Dashboard"]
 ```
@@ -176,6 +191,7 @@ Every event carries its source, and sources are trusted differently:
 |---|---|---|
 | Hooks · log observer | Every tool call and result, the agent's reasoning | **Ground truth** — what actually ran |
 | MCP server | Discoveries, chain steps, findings | **Claims** — the agent's word |
+| Proxy import | Hosts, endpoints and parameter names from proxy history | **Observed traffic** — what crossed the wire |
 | Navigator | Leads and finding verdicts | **Advice** — a second model's read |
 | Operator | Scope and review verdicts | **Authority** — yours alone |
 
@@ -198,6 +214,7 @@ packages/web      Dashboard (React, Vite, d3-force)
 
 - **Local only.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins.
 - **The audit log is sensitive.** It holds file paths, commands, URLs, your prompts and the agent's reasoning (file contents and patches are stripped). Treat it like shell history; delete `~/.spectra/sessions` to clear it.
+- **Imports keep names, not values.** Proxy history is reduced on your side before it reaches the hub — see [Import proxy history](#import-proxy-history).
 - **Any local process can post events.** Labels and the hash chain make claims and after-the-fact edits visible, but events injected live are chained like any other.
 
 Spectra is for testing you're **authorized** to do — your own code, a contracted engagement, or a bug bounty program within its published scope. See [SECURITY.md](SECURITY.md) for responsible use and how to report a vulnerability in Spectra itself.
@@ -219,7 +236,7 @@ Spectra is for testing you're **authorized** to do — your own code, a contract
 
 ## Roadmap
 
-- **Proxy ingest** — import Burp / Caido / ZAP history (HAR) and a passive mitmproxy add-on, so the map shows what responses *revealed*, not only what the agent touched. Ingest only: Spectra stays read-only.
+- **Live proxy feed** — a passive mitmproxy add-on that streams traffic onto the map as it happens (today: HAR import). Ingest only: Spectra stays read-only.
 - **Response-aware recon** — opt-in extraction of links, routes and parameters from tool output.
 - **Report export** — findings with their attack chain and audit head hash, in bug-bounty report format.
 

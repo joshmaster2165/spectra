@@ -16,9 +16,11 @@ export type Importance = 1 | 2 | 3 | 4 | 5;
 
 /**
  * Where an event came from. hook/observer are ground truth (what Claude Code
- * actually did); mcp/demo are claims made by the agent or a script.
+ * actually did); mcp/demo are claims made by the agent or a script; proxy is
+ * traffic imported from proxy history (what crossed the wire, not what the
+ * agent did); validator is the Navigator's advice.
  */
-export type EventSource = "hook" | "observer" | "mcp" | "demo" | "hub" | "operator" | "validator";
+export type EventSource = "hook" | "observer" | "mcp" | "demo" | "hub" | "operator" | "validator" | "proxy";
 
 export interface MapNode {
   id: string;
@@ -189,6 +191,113 @@ export interface FindingAssessment {
   confidence: number;
   rationale?: string;
   ts: number;
+}
+
+/* ── Proxy import ──────────────────────────────────────── */
+
+/**
+ * One request from proxy history, reduced to what the map needs. Only
+ * parameter *names* are kept: values (tokens, passwords, personal data) never
+ * leave the importer, and the URL is sent without its query string.
+ */
+export interface HttpEntry {
+  method: string;
+  url: string;
+  status?: number;
+  mime?: string;
+  params?: string[];
+}
+
+/** What an import added to the map and what it left out. */
+export interface ImportSummary {
+  requests: number;
+  imported: number;
+  endpoints: number;
+  newEndpoints: number;
+  params: number;
+  skippedStatic: number;
+  skippedOutOfScope: number;
+  /** Most frequent out-of-scope hosts, for the operator to check. */
+  outOfScopeHosts: string[];
+  hint?: string;
+}
+
+const MAX_PARAMS = 40;
+
+/** Reads a HAR 1.2 file (Burp, Caido, ZAP, browser devtools) into compact entries. */
+export function parseHar(har: unknown): HttpEntry[] {
+  const entries = (har as { log?: { entries?: unknown } } | null)?.log?.entries;
+  if (!Array.isArray(entries)) throw new Error("Not a HAR file: expected log.entries");
+  const out: HttpEntry[] = [];
+  for (const e of entries as any[]) {
+    const req = e?.request;
+    if (typeof req?.url !== "string" || !/^https?:\/\//i.test(req.url)) continue;
+    let url: URL;
+    try {
+      url = new URL(req.url);
+    } catch {
+      continue;
+    }
+    const names = new Set<string>(url.searchParams.keys());
+    for (const q of req.queryString ?? []) if (q?.name) names.add(String(q.name));
+    for (const p of req.postData?.params ?? []) if (p?.name) names.add(String(p.name));
+    if (typeof req.postData?.text === "string") bodyParamNames(req.postData.text, String(req.postData.mimeType ?? ""), names);
+    url.search = url.hash = url.username = url.password = "";
+    const status = e.response?.status;
+    const mime = e.response?.content?.mimeType;
+    out.push({
+      method: String(req.method ?? "GET").toUpperCase(),
+      url: url.toString(),
+      status: typeof status === "number" && status > 0 ? status : undefined,
+      mime: typeof mime === "string" && mime ? mime.split(";")[0].trim().toLowerCase() : undefined,
+      params: names.size ? [...names].slice(0, MAX_PARAMS) : undefined,
+    });
+  }
+  return out;
+}
+
+/** Top-level field names from a JSON or form-encoded request body. */
+function bodyParamNames(text: string, mime: string, names: Set<string>) {
+  if (!text) return;
+  if (mime.includes("json") || /^\s*\{/.test(text)) {
+    try {
+      const v = JSON.parse(text);
+      if (v && typeof v === "object" && !Array.isArray(v)) for (const k of Object.keys(v)) names.add(k);
+    } catch {
+      // Not JSON after all.
+    }
+  } else if (mime.includes("x-www-form-urlencoded")) {
+    for (const k of new URLSearchParams(text).keys()) names.add(k);
+  }
+}
+
+export function emptySummary(): ImportSummary {
+  return { requests: 0, imported: 0, endpoints: 0, newEndpoints: 0, params: 0, skippedStatic: 0, skippedOutOfScope: 0, outOfScopeHosts: [] };
+}
+
+/** Totals for an import sent in several chunks. */
+export function addSummary(a: ImportSummary, b: ImportSummary): ImportSummary {
+  return {
+    requests: a.requests + b.requests,
+    imported: a.imported + b.imported,
+    endpoints: a.endpoints + b.endpoints,
+    newEndpoints: a.newEndpoints + b.newEndpoints,
+    params: a.params + b.params,
+    skippedStatic: a.skippedStatic + b.skippedStatic,
+    skippedOutOfScope: a.skippedOutOfScope + b.skippedOutOfScope,
+    outOfScopeHosts: [...new Set([...a.outOfScopeHosts, ...b.outOfScopeHosts])].slice(0, 8),
+    hint: b.hint ?? a.hint,
+  };
+}
+
+/** One line for the CLI, the dashboard and the activity stream. */
+export function describeImport(s: ImportSummary): string {
+  const skipped = [s.skippedOutOfScope && `${s.skippedOutOfScope} out of scope`, s.skippedStatic && `${s.skippedStatic} static`].filter(Boolean);
+  return (
+    `Imported ${s.imported} of ${s.requests} requests: ${s.endpoints} endpoints (${s.newEndpoints} new), ${s.params} parameters` +
+    (skipped.length ? `; skipped ${skipped.join(", ")}` : "") +
+    "."
+  );
 }
 
 /* ── Events ────────────────────────────────────────────── */

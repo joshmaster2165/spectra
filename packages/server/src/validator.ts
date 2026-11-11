@@ -42,7 +42,7 @@ const VERDICTS = ["corroborated", "unconvinced", "needs-evidence"] as const;
 const SYSTEM = `You are the Navigator, a read-only co-pilot for AUTHORIZED security testing. Another agent — the driver — is exploring a target and mapping what it touches. You sit in the second seat: you read the live map, you do not act on the target.
 
 Your job each cycle:
-1. Point at the promising areas. For map nodes worth the driver's attention, emit a lead with a 0–1 confidence (your estimate the area hides a real, in-scope bug), a recommendation (pursue / watch / skip), a short suspected bug class (e.g. idor, authz, injection, ssrf, secrets, auth-bypass), and a one-line rationale. Favour reachable, unauthenticated, or auth/identity-bearing surfaces and places the driver has not yet explored. It is fine — useful — to say skip.
+1. Point at the promising areas. For map nodes worth the driver's attention, emit a lead with a 0–1 confidence (your estimate the area hides a real, in-scope bug), a recommendation (pursue / watch / skip), a short suspected bug class (e.g. idor, authz, injection, ssrf, secrets, auth-bypass), and a one-line rationale. Favour reachable, unauthenticated, or auth/identity-bearing surfaces and places the driver has not yet explored. Nodes "seen in proxy traffic" were observed on the wire but never tested by the driver — strong candidates when they look sensitive. It is fine — useful — to say skip.
 2. Validate the driver's findings. For each finding, give an independent verdict (corroborated / unconvinced / needs-evidence) and a calibrated confidence, judging only from the evidence chain and map shown.
 
 Hard rules:
@@ -105,7 +105,9 @@ function digest(s: GraphState): string {
   const nodes = Object.values(s.nodes).slice(0, MAX_NODES);
   lines.push(`Map — ${nodes.length} nodes:`);
   for (const n of nodes) {
-    const tags = [n.kind, n.status, n.category && `in:${n.category}`, n.outOfScope && "[OUT OF SCOPE]"].filter(Boolean).join(" ");
+    const seenIn = n.meta?.["seen in"];
+    const traffic = seenIn && `seen in ${seenIn}, ${n.meta?.requests} req${n.meta?.["status codes"] ? `, status ${n.meta["status codes"]}` : ""}`;
+    const tags = [n.kind, n.status, n.category && `in:${n.category}`, traffic, n.outOfScope && "[OUT OF SCOPE]"].filter(Boolean).join(" ");
     const existing = s.assessments[`nav:${n.id}`];
     const prior = existing ? ` (you last said ${existing.recommendation} ${Math.round(existing.confidence * 100)}%)` : "";
     lines.push(`- ${n.id} "${n.label}" [${tags}]${prior}`);

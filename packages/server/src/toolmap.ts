@@ -255,7 +255,7 @@ function hostOf(url: string): string | undefined {
 }
 
 /** Registrable domain, roughly: example.com, example.co.uk; IPs and single labels as-is. */
-function apexOf(host: string): string {
+export function apexOf(host: string): string {
   if (/^[\d.]+$/.test(host) || host.includes(":")) return host;
   const labels = host.split(".");
   if (labels.length <= 2) return host;
@@ -265,8 +265,12 @@ function apexOf(host: string): string {
   return labels.slice(-take).join(".");
 }
 
-/** "/api/users/42/orders?x=1" → "/api/users/:id/orders"; undefined for the bare host. */
-function normalizeRoute(url: string): string | undefined {
+/**
+ * "/api/users/42/orders?x=1" → "/api/users/:id/orders"; undefined for the bare host.
+ * Long token-like segments (reset links, signed URLs) collapse to ":token" so
+ * secrets in paths stay out of the map.
+ */
+export function normalizeRoute(url: string): string | undefined {
   let pathname: string;
   try {
     pathname = new URL(url).pathname;
@@ -277,8 +281,13 @@ function normalizeRoute(url: string): string | undefined {
     .split("/")
     .filter(Boolean)
     .slice(0, 6)
-    .map((seg) => (/^\d+$|^[0-9a-f]{8}-[0-9a-f-]{27,}$|^[0-9a-f]{16,}$/i.test(seg) ? ":id" : seg));
+    .map((seg) => (/^\d+$|^[0-9a-f]{8}-[0-9a-f-]{27,}$|^[0-9a-f]{16,}$/i.test(seg) ? ":id" : isToken(seg) ? ":token" : seg));
   return segments.length ? "/" + segments.join("/") : undefined;
+}
+
+/** 20+ URL-safe characters mixing letters and digits; slugs (two or more hyphens) aren't tokens. */
+function isToken(seg: string) {
+  return /^[A-Za-z0-9_-]{20,}$/.test(seg) && /\d/.test(seg) && /[A-Za-z]/.test(seg) && (seg.match(/-/g)?.length ?? 0) < 2;
 }
 
 function dedupe(ts: Target[]): Target[] {

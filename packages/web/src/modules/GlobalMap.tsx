@@ -38,6 +38,7 @@ const ICONS: Record<string, string[]> = {
   subdomain: ["M12 3 C15.3 3 18 5.7 18 9 C18 14 12 21 12 21 C12 21 6 14 6 9 C6 5.7 8.7 3 12 3 Z", "M9.5 9 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0"],
   endpoint: ["M9 4 C6 4 8 11 5 12 C8 13 6 20 9 20", "M15 4 C18 4 16 11 19 12 C16 13 18 20 15 20"],
   params: ["M4 12.5 L11.5 5 H19 V12.5 L11.5 20 Z", "M14.9 9.1 a0.9 0.9 0 1 0 1.8 0 a0.9 0.9 0 1 0 -1.8 0"],
+  proxy: ["M5 9 H18", "M15 6 L18 9 L15 12", "M19 15 H6", "M9 12 L6 15 L9 18"],
   other: ["M4 12 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0", "M12 9.5 V13", "M12 16 H12.01"],
 };
 
@@ -53,9 +54,11 @@ const LEGEND: { name: string; label: string }[] = [
   { name: "subdomain", label: "Host" },
   { name: "endpoint", label: "Endpoint" },
   { name: "params", label: "Param" },
+  { name: "proxy", label: "Proxy import" },
 ];
 
 function iconFor(n: MapNode): string {
+  if (n.id.startsWith("import:") && n.kind === "root") return "proxy";
   if (n.kind === "root") return "root";
   if (n.id.startsWith("domain:")) return "domain";
   if (n.id.startsWith("host:")) return "subdomain";

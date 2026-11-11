@@ -16,6 +16,7 @@
     "hooks:install": "node packages/server/bin/install-hooks.mjs",
     "mcp": "npm run mcp --workspace @spectra/server",
     "validator": "npm run validator --workspace @spectra/server",
+    "import": "npm run import --workspace @spectra/server --",
     "demo": "npm run demo --workspace @spectra/server",
     "typecheck": "tsc -p packages/server && tsc -p packages/web --noEmit",
     "build": "npm run build --workspace @spectra/web",

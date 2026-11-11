@@ -1,4 +1,5 @@
-import type { SpectraEvent } from "@spectra/schema";
+import fs from "node:fs";
+import { parseHar, type SpectraEvent } from "@spectra/schema";
 
 /**
  * Posts a scripted bug-hunting session to a running hub so the dashboard can
@@ -8,7 +9,9 @@ import type { SpectraEvent } from "@spectra/schema";
  *
  * Story: the operator authorizes acme-shop.test. The agent maps its API, finds
  * an IDOR in the cart, fixes it, and strays once to production (acme-shop.com),
- * which is flagged as a scope violation. The Navigator then scores the surface.
+ * which is flagged as a scope violation. The operator's proxy history is then
+ * imported (examples/acme-shop.har), revealing surface the agent never touched,
+ * and the Navigator scores it all.
  */
 
 const HUB = process.env.SPECTRA_HUB ?? "http://127.0.0.1:4317";
@@ -144,12 +147,25 @@ for (const step of script) {
   await sleep(400);
 }
 
+// The operator's proxy history arrives — the same path as Import HAR and `npm run import`.
+const har = JSON.parse(fs.readFileSync(new URL("../../../examples/acme-shop.har", import.meta.url), "utf8"));
+await fetch(`${HUB}/import`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ entries: parseHar(har), label: "acme-shop.har" }),
+});
+await sleep(400);
+
 // The Navigator's take — scored leads and finding verdicts the validator process
 // would normally produce. Posted to /validator so they're labelled `validator`.
 const nav: any[] = [
   {
     type: "assessment.upsert",
     assessment: { id: `nav:${ep("/api/cart")}`, nodeId: ep("/api/cart"), title: "Cart authorization boundary", bugClass: "idor", confidence: 0.82, recommendation: "pursue", rationale: "Reads a user id from an unsigned cookie — classic IDOR surface, and already load-bearing in the chain." },
+  },
+  {
+    type: "assessment.upsert",
+    assessment: { id: `nav:${ep("/api/admin/export")}`, nodeId: ep("/api/admin/export"), title: "Admin export, seen only in traffic", bugClass: "authz", confidence: 0.77, recommendation: "pursue", rationale: "An admin route the proxy saw succeed from a normal session, and the agent has never tested it. Check who can call it." },
   },
   {
     type: "assessment.upsert",
