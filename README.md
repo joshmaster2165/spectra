@@ -57,15 +57,21 @@ The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart
 
 ### Sort the attack surface as it comes in
 
-<p align="center"><img src="docs/media/surface.webp" alt="The Surface view filling with endpoints as recon runs, newest first; then sorted by the Navigator's score, filtered to admin routes and to unmapped endpoints, and switched to hosts sorted by endpoint count" width="100%"></p>
+<p align="center"><img src="docs/media/surface.webp" alt="The Surface view filling with tagged endpoints as recon runs, newest first; then sorted by the Navigator's score, narrowed to the payments tag with the refund endpoint marked To test, filtered to admin routes, and switched to hosts sorted by endpoint count" width="100%"></p>
 
-The **Surface** view is every endpoint, host or parameter as a live table, newest first so discoveries land on top. Click any column to sort — by the Navigator's score, status, source (agent, proxy or both), request count or findings — and filter by text, by status, or to scored leads only. [More →](docs/dashboard.md)
+The **Surface** view is every endpoint, host or parameter as a live table, newest first so discoveries land on top. Each target is tagged automatically (`api`, `auth`, `admin`, `internal`, `payments`, `object-id`…), and you can sort by any column — the Navigator's score, your triage mark, status, source, request count. Mark targets **To test / Testing / Tested / Skip** as you go, then export the rows as CSV. [More →](docs/dashboard.md)
+
+### Filter the map down to what matters
+
+<p align="center"><img src="docs/media/filters.webp" alt="Filtering the attack-surface graph: opening the filter bar, narrowing to auth surface, then admin and API routes, then scored leads only; hiding the agent's activity layer; searching for orders and seeing the same filter applied in the Surface table" width="100%"></p>
+
+One filter bar drives both the graph and the table: search, tags, status, scored leads, and your triage marks. Everything that doesn't match dims, matches stay connected to their hosts, and layers hide the agent's activity so only the attack surface is left. [More →](docs/dashboard.md)
 
 ### Let the Navigator point the way
 
 <p align="center"><img src="docs/media/navigator.webp" alt="The Navigator scoring a mapped attack surface: pursue, watch and skip leads arrive with confidence scores and rationale, its verdicts appear beside each finding, and the Surface table shows the scored leads sorted by promise" width="100%"></p>
 
-The **Navigator** is a second model in the second seat. It reads the map you see, scores where the bugs are likely to be — *pursue*, *watch* or *skip*, with a bug class, a 0–100% confidence and a one-line reason — and independently corroborates or challenges each finding. Advice only: it never touches the target or promotes anything out of scope. [How it works →](docs/navigator.md)
+The **Navigator** is a second model in the second seat. It reads the map you see, scores where the bugs are likely to be — *pursue*, *watch* or *skip*, with a bug class, a 0–100% confidence and a one-line reason — and independently corroborates or challenges each finding. Advice only: it never touches the target or promotes anything out of scope. Turn it on from **Settings** with its own API key. [How it works →](docs/navigator.md)
 
 ### Walk the hierarchy
 
@@ -80,7 +86,7 @@ The **Tree** view lays the same surface out as **domain → subdomain → endpoi
 **Map the attack surface**
 - A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools — that keeps new discoveries in frame as it grows.
 - Every URL becomes a **domain → subdomain → endpoint** tree; numeric IDs, UUIDs, hashes and tokens collapse to `:id` / `:token`, so you see the API's shape, not ten thousand one-off URLs.
-- A sortable **Surface** table and a collapsible **Tree** of the same map.
+- A sortable **Surface** table and a collapsible **Tree** of the same map, with automatic tags and one filter bar shared with the graph.
 - **Import proxy history** (HAR from browser DevTools or any proxy that exports it). Traffic merges onto the same map, and surface the agent never touched shows up as *unmapped* — a ready-made to-do list.
 - Code-review coverage: every in-scope file marked read, edited or **never opened**.
 
@@ -88,8 +94,13 @@ The **Tree** view lays the same surface out as **domain → subdomain → endpoi
 - You define the scope (paths and hosts). Every out-of-scope read, write, exec or network call is flagged in red, with a desktop alert.
 - The agent has no tool to change scope or verdicts, and the hub rejects them on its annotation channel.
 
+**Organize the hunt**
+- **Triage marks** on any target — To test, Testing, Tested, Skip — with notes, so recon turns into a worklist before you move to the next phase.
+- **Pick up where you left off.** The map, your marks, findings and leads come back when the hub restarts; **New engagement** in Settings clears it for the next target.
+- Export the surface as **CSV**, or a **Markdown report** with the surface, tags, leads, your triage and the findings.
+
 **Get a second opinion**
-- The **Navigator** ranks leads by promise and corroborates or challenges each finding — shown beside the agent's own claim and your review, never mixed with them.
+- The **Navigator** ranks leads by promise and corroborates or challenges each finding — shown beside the agent's own claim and your review, never mixed with them. It sees your triage marks, and you set it up from **Settings**.
 
 **Prove what happened**
 - Findings carry their attack chain, the edits that fixed them, and your verdict.
@@ -114,7 +125,7 @@ They're complementary: run the agent through your proxy, watch it in Spectra, th
 
 ## Setup in brief
 
-**Requirements:** Node.js 20+, Claude Code, macOS or Linux (Windows through WSL). The [setup guide](docs/setup.md) covers every step in full.
+**Requirements:** Node.js 20+, Claude Code, macOS or Linux (Windows through WSL). The [setup guide](docs/setup.md) covers every step in full, and **Settings → Setup** in the dashboard shows what's connected.
 
 1. **Set your scope** — the folders and hosts you're authorized to test. Hosts include their subdomains; loopback is always in scope.
    ```bash
@@ -128,11 +139,7 @@ They're complementary: run the agent through your proxy, watch it in Spectra, th
    ```bash
    claude mcp add spectra -- "$(pwd)/node_modules/.bin/tsx" "$(pwd)/packages/server/src/mcp.ts"
    ```
-4. **Start the Navigator** (optional) — the second model that scores leads and checks findings:
-   ```bash
-   export ANTHROPIC_API_KEY=sk-ant-...
-   npm run validator
-   ```
+4. **Turn on the Navigator** (optional) — the second model that scores leads and checks findings. Open **Settings** in the dashboard, add its API key, press **Test connection**, and switch it on. (Or run it as its own process: `ANTHROPIC_API_KEY=… npm run validator`.)
 5. **Import proxy history** (optional) — click **Import HAR** in the dashboard, or:
    ```bash
    npm run import -- burp-history.har
@@ -158,7 +165,7 @@ Every event carries its source, and sources are trusted differently:
 | MCP server | Discoveries, chain steps, findings | **Claims** — the agent's word |
 | Proxy import | Hosts, endpoints and parameter names from proxy history | **Observed traffic** — what crossed the wire |
 | Navigator | Leads and finding verdicts | **Advice** — a second model's read |
-| Operator | Scope and review verdicts | **Authority** — yours alone |
+| Operator | Scope, review verdicts and triage marks | **Authority** — yours alone |
 
 ```
 packages/schema   Event types, the shared reducer and the HAR parser (hub, dashboard and replay share them)
@@ -170,7 +177,8 @@ The [reference](docs/reference.md) documents every MCP tool and hub route; [conf
 
 ## Security and privacy
 
-- **Local hub.** The hub listens on `127.0.0.1`, makes no outbound connections, and refuses requests and WebSockets from non-local browser origins. Two things do reach out: the dashboard loads its fonts from Google Fonts, and the optional Navigator calls the Anthropic API.
+- **Local hub.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins. It makes no outbound connections unless you turn on the Navigator, which calls the Anthropic API. The dashboard also loads its fonts from Google Fonts.
+- **The Navigator's key stays put.** A key entered in Settings is stored in `~/.spectra/settings.json`, readable only by you, and is never sent back to the browser.
 - **Tamper-evident.** Every event is appended to a hash-chained audit log; `npm run verify` checks it, and exported reports carry the head hash.
 - **Names, not values.** Proxy imports keep parameter names and drop query strings, bodies and credentials before anything reaches the hub.
 - **The audit log is sensitive.** It holds paths, commands, URLs, your prompts and the agent's reasoning. Treat it like shell history.

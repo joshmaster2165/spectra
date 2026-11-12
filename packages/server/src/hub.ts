@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import {
@@ -16,9 +17,13 @@ import {
   type ServerMessage,
   type SessionInfo,
   type SpectraEvent,
+  type TriageState,
 } from "@spectra/schema";
 import { Translator } from "./toolmap.ts";
 import { importEntries } from "./har.ts";
+import { DEFAULT_MODEL, Navigator, type NavigatorStatus } from "./navigator.ts";
+import { SettingsStore } from "./settings.ts";
+import { EngagementStore } from "./engagement.ts";
 import { inScope, makeScope, severityOf, type ScopeConfig } from "./scope.ts";
 import { AuditLog } from "./audit.ts";
 
@@ -35,9 +40,18 @@ export interface HubOptions {
   staticDir?: string;
   /** Called for each scope violation (desktop alerts). */
   onViolation?: (v: ScopeViolation) => void;
+  /** Where dashboard settings (the Navigator's key, model, on/off) are kept; undefined keeps them in memory. */
+  settingsFile?: string;
+  /** Whether the transcript observer is running, for the setup checklist. */
+  observer?: boolean;
+  /** false starts a new engagement instead of restoring the last one. */
+  resume?: boolean;
 }
 
 const VERDICTS = ["verified", "rejected", "needs-info"];
+const TRIAGE_STATES: TriageState[] = ["queued", "testing", "tested", "skipped"];
+const NODE_KINDS: string[] = ["root", "category", "leaf"];
+
 /** Directories skipped when listing in-scope files for review coverage. */
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "vendor", "__pycache__", ".venv", "venv", "target", "coverage"]);
 const FILE_LIMIT = 20_000;
@@ -65,7 +79,13 @@ const MIME: Record<string, string> = {
  *   POST /events           agent/demo annotations (MCP server, demo script)
  *   POST /validator        Navigator leads and finding verdicts (validator process)
  *   POST /import           proxy history { entries: HttpEntry[], label?, includeStatic? } → ImportSummary
+ *   GET  /settings         Navigator settings and status (never the key itself)
+ *   POST /settings         { navigator: { apiKey?, model?, enabled? } }
+ *   POST /navigator/test   one tiny request to check the saved key and model
+ *   GET  /health           what's connected, for the setup checklist
+ *   POST /triage           operator's mark on a target { nodeId, state, note }
  *   POST /scope            operator sets the scope { paths, hosts }
+ *   POST /engagement/new   operator clears the live map and starts a new engagement
  *   POST /review           operator verdict on a finding { findingId, verdict, note }
  *   GET  /files            files under the scope paths, for review coverage
  *   WS   /ws               snapshot on connect, then { kind: "event" } messages
@@ -82,6 +102,16 @@ export class Hub {
   private seenToolResults = new Set<string>();
   private sessionCwds = new Map<string, string>();
   private audit?: AuditLog;
+  /** The sessions on the live map; restored from their audit logs when the hub starts. */
+  private engagement?: EngagementStore;
+  /** What the last restore brought back, for the startup line and the setup checklist. */
+  restored: { events: number; sessions: number } | null = null;
+  private settings: SettingsStore;
+  /** The Navigator, when it's turned on in Settings and has a key. */
+  private navigator?: Navigator;
+  /** When each channel last delivered something, for the setup checklist. */
+  private seen: { hook?: number; mcp?: number; validator?: number; import?: number } = {};
+  private startedAt = Date.now();
   readonly server: http.Server;
 
   constructor(private opts: HubOptions) {
@@ -94,10 +124,88 @@ export class Hub {
       verifyClient: ({ origin }: { origin?: string }) => isLocalOrigin(origin),
     });
     this.wss.on("connection", (ws) => send(ws, { kind: "snapshot", state: this.state }));
-    if (opts.dataDir) this.audit = new AuditLog(opts.dataDir);
-    if (opts.scope.paths?.length) this.setScope(makeScope(opts.scope, "config"));
+    if (opts.dataDir) {
+      this.audit = new AuditLog(opts.dataDir);
+      this.engagement = new EngagementStore(path.join(opts.dataDir, "_engagement.json"));
+      if (opts.resume === false) this.engagement.reset();
+      else this.restore();
+    }
+    this.settings = new SettingsStore(opts.settingsFile);
+    this.configureNavigator();
+    this.applyConfiguredScope();
+  }
+
+  /** The scope from the config file and environment, applied at startup and for a new engagement. */
+  private applyConfiguredScope() {
+    const cfg = this.opts.scope;
+    const restored = this.state.scope;
+    let next: Scope | undefined;
+    if (cfg.paths?.length) next = makeScope(cfg, "config");
+    // A restored engagement keeps its scope; hosts in the config are added to it.
+    else if (restored) next = makeScope({ paths: restored.paths, hosts: [...restored.hosts, ...(cfg.hosts ?? [])] }, restored.origin);
     // Hosts without paths: authorize the hosts now; each session's directory joins as it starts.
-    else if (opts.scope.hosts?.length) this.setScope(makeScope({ hosts: opts.scope.hosts }, "session"));
+    else if (cfg.hosts?.length) next = makeScope({ hosts: cfg.hosts }, "session");
+    if (next && JSON.stringify(next) !== JSON.stringify(restored)) this.setScope(next);
+  }
+
+  /**
+   * Rebuild the live map from the audit logs of the engagement's sessions.
+   * Events are merged across sessions by time, keeping each log's own order.
+   */
+  private restore() {
+    if (!this.audit || !this.engagement) return;
+    const logs = this.engagement
+      .get()
+      .sessions.map((s) => this.audit!.read(s.id).slice(s.from))
+      .filter((l) => l.length);
+    const at = logs.map(() => 0);
+    let events = 0;
+    for (;;) {
+      let pick = -1;
+      for (let i = 0; i < logs.length; i++) {
+        if (at[i] >= logs[i].length) continue;
+        if (pick < 0 || logs[i][at[i]].ts < logs[pick][at[pick]].ts) pick = i;
+      }
+      if (pick < 0) break;
+      const e = logs[pick][at[pick]++];
+      // Each log repeats the scope in force, so most scope lines change nothing.
+      if (e.type === "scope.set" && JSON.stringify(e.scope) === JSON.stringify(this.state.scope)) continue;
+      try {
+        this.state = applyEvent(this.state, e);
+      } catch {
+        continue; // a line that isn't a usable event
+      }
+      this.history.push(e);
+      if (e.source === "hook") this.hookSessions.add(e.sessionId);
+      if (e.type === "tool.call") this.seenToolCalls.add(e.toolUseId);
+      if (e.type === "tool.result") this.seenToolResults.add(e.toolUseId);
+      if (e.type === "session.start" && e.cwd) this.sessionCwds.set(e.sessionId, e.cwd);
+      events++;
+    }
+    if (this.history.length > HISTORY_LIMIT) this.history.splice(0, this.history.length - HISTORY_LIMIT);
+    if (events) this.restored = { events, sessions: logs.length };
+  }
+
+  /** Clear the live map and start over. Recorded sessions stay on disk and replayable. */
+  newEngagement() {
+    this.state = emptyState();
+    this.history = [];
+    this.hookSessions.clear();
+    this.seenToolCalls.clear();
+    this.seenToolResults.clear();
+    this.sessionCwds.clear();
+    this.restored = null;
+    // Sessions still running introduce themselves again on their next event.
+    this.hooks.forget();
+    this.engagement?.reset();
+    for (const client of this.wss.clients) send(client, { kind: "snapshot", state: this.state });
+    this.applyConfiguredScope();
+  }
+
+  /** Flush the audit logs before the process exits. */
+  async close() {
+    this.navigator?.stop();
+    await this.audit?.close();
   }
 
   listen(port: number, host = "127.0.0.1") {
@@ -184,6 +292,98 @@ export class Hub {
     return summary;
   }
 
+  /* ── Settings and the in-hub Navigator ───────────────── */
+
+  /** (Re)starts the Navigator from the current settings: it runs only when enabled and a key is available. */
+  private configureNavigator() {
+    this.navigator?.stop();
+    this.navigator = undefined;
+    const s = this.settings.get().navigator;
+    if (!s.enabled || !(s.apiKey || process.env.ANTHROPIC_API_KEY)) return;
+    this.navigator = new Navigator({
+      getState: () => this.state,
+      apiKey: s.apiKey,
+      model: s.model ?? process.env.SPECTRA_VALIDATOR_MODEL,
+      idleMs: Number(process.env.SPECTRA_VALIDATOR_IDLE_MS ?? 2500),
+      log: (msg) => console.log(`[navigator] ${msg}`),
+      post: (events) => {
+        for (const e of events) this.publish({ ts: Date.now(), ...e, source: "validator" } as SpectraEvent);
+      },
+    });
+    this.navigator.notify(); // assess what's already on the map
+  }
+
+  /** Settings as the dashboard may see them: the key itself never leaves the hub. */
+  private settingsView() {
+    const s = this.settings.get().navigator;
+    const key = s.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    const model = s.model ?? process.env.SPECTRA_VALIDATOR_MODEL ?? DEFAULT_MODEL;
+    const status: NavigatorStatus = this.navigator?.status() ?? { state: "off", model, runs: 0 };
+    return {
+      navigator: {
+        enabled: !!s.enabled,
+        model,
+        hasKey: !!key,
+        keySource: s.apiKey ? "settings" : key ? "environment" : null,
+        keyHint: key ? `…${key.slice(-4)}` : null,
+        status,
+      },
+    };
+  }
+
+  private updateSettings(patch: { apiKey?: unknown; model?: unknown; enabled?: unknown }) {
+    const next: { apiKey?: string; model?: string; enabled?: boolean } = {};
+    // "" clears a saved key or model; anything else must look like one.
+    if (typeof patch.apiKey === "string" && patch.apiKey.length <= 400 && !/\s/.test(patch.apiKey)) next.apiKey = patch.apiKey;
+    if (typeof patch.model === "string" && /^[\w.:-]{0,80}$/.test(patch.model)) next.model = patch.model;
+    if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
+    this.settings.update(next);
+    this.configureNavigator();
+    return this.settingsView();
+  }
+
+  /** One tiny request with the saved key and model, so a bad key shows up in Settings, not mid-engagement. */
+  private async testNavigator(): Promise<{ ok: boolean; error?: string }> {
+    const s = this.settings.get().navigator;
+    if (!(s.apiKey || process.env.ANTHROPIC_API_KEY)) return { ok: false, error: "Add an API key first." };
+    const probe = new Navigator({ getState: () => this.state, post: () => {}, apiKey: s.apiKey, model: s.model ?? process.env.SPECTRA_VALIDATOR_MODEL });
+    const result = await probe.test();
+    probe.stop();
+    return result;
+  }
+
+  /** What's connected, for the setup checklist. */
+  private health() {
+    const scope = this.state.scope;
+    return {
+      hub: { startedAt: this.startedAt, events: this.history.length },
+      scope: scope ? { set: true, origin: scope.origin, paths: scope.paths.length, hosts: scope.hosts.length } : { set: false },
+      hooks: { lastSeen: this.seen.hook ?? null, sessions: this.hookSessions.size },
+      observer: { enabled: !!this.opts.observer },
+      mcp: { lastSeen: this.seen.mcp ?? null },
+      proxy: { lastImport: this.seen.import ?? null },
+      navigator: { ...this.settingsView().navigator, externalLastSeen: this.seen.validator ?? null },
+      // Shown in the dashboard: abbreviate the home directory.
+      audit: { enabled: !!this.audit, dir: this.opts.dataDir?.replace(os.homedir(), "~") ?? null },
+      engagement: this.engagement ? { started: this.engagement.get().started, sessions: this.engagement.get().sessions.length, restored: this.restored } : null,
+    };
+  }
+
+  /** The operator's triage mark on a target; `state: null` clears it. */
+  triage(nodeId: unknown, state: unknown, note?: unknown): boolean {
+    if (typeof nodeId !== "string" || !this.state.nodes[nodeId]) return false;
+    if (state !== null && !TRIAGE_STATES.includes(state as TriageState)) return false;
+    this.commit({
+      ts: Date.now(),
+      sessionId: this.state.sessionId ?? "operator",
+      source: "operator",
+      type: "target.triage",
+      nodeId,
+      triage: state === null ? null : { state: state as TriageState, note: typeof note === "string" && note.trim() ? note.trim().slice(0, 2000) : undefined, ts: Date.now() },
+    });
+    return true;
+  }
+
   review(findingId: string, verdict: string, note?: string): boolean {
     const f = this.state.findings[findingId];
     if (!f || !VERDICTS.includes(verdict)) return false;
@@ -230,6 +430,7 @@ export class Hub {
     const sessionId: string | undefined = p?.session_id;
     if (!sessionId) return;
     this.hookSessions.add(sessionId);
+    this.seen.hook = Date.now();
     const ts = Date.now();
     const toolUseId: string = p.tool_use_id ?? fallbackToolId(p);
     switch (p.hook_event_name) {
@@ -259,6 +460,11 @@ export class Hub {
 
   /** Dedupe and drop events that would double-count the same tool call. */
   private accept(e: SpectraEvent): boolean {
+    // A malformed node from a script or annotation would break every view that draws it.
+    if (e.type === "node.upsert") {
+      const n = e.node as Partial<typeof e.node> | undefined;
+      if (!n || typeof n.id !== "string" || !n.id || typeof n.label !== "string" || !NODE_KINDS.includes(n.kind as string)) return false;
+    }
     if (e.source === "observer" && this.hookSessions.has(e.sessionId) && e.type !== "thought") return false;
     if (e.type === "tool.call") {
       if (this.seenToolCalls.has(e.toolUseId)) return false;
@@ -278,12 +484,15 @@ export class Hub {
     this.persist(event);
     const msg: ServerMessage = { kind: "event", event };
     for (const client of this.wss.clients) send(client, msg);
+    // The Navigator reassesses when the map changes — but not in response to its own advice.
+    if (event.source !== "validator") this.navigator?.notify();
   }
 
   private extendSessionScope(cwd: string) {
     const current = this.state.scope;
     if (current?.paths.includes(path.resolve(cwd))) return;
-    this.setScope(makeScope({ paths: [...(current?.paths ?? []), cwd], hosts: this.opts.scope.hosts }, "session"));
+    // Hosts the operator added in Settings stay; a new session only adds its directory.
+    this.setScope(makeScope({ paths: [...(current?.paths ?? []), cwd], hosts: current?.hosts ?? this.opts.scope.hosts }, "session"));
   }
 
   /* ── Audit log ───────────────────────────────────────── */
@@ -291,12 +500,14 @@ export class Hub {
   private persist(event: SpectraEvent) {
     if (!this.audit) return;
     if (event.type === "scope.set") {
-      // Scope is global; record the change in every open session log.
-      for (const id of this.audit.openSessions()) this.audit.append(id, event);
+      // Scope is global; record the change in the open log of every session on the map.
+      for (const id of this.audit.openSessions()) if (!this.engagement || this.engagement.has(id)) this.audit.append(id, event);
       return;
     }
     if (event.sessionId === "hub") return;
-    if (!this.audit.isOpen(event.sessionId) && this.state.scope) {
+    const joining = !!this.engagement && !this.engagement.has(event.sessionId);
+    if (joining) this.engagement!.add(event.sessionId, this.audit.length(event.sessionId));
+    if ((joining || !this.audit.isOpen(event.sessionId)) && this.state.scope) {
       // Each log starts with the scope in force, so replay and verification stand alone.
       this.audit.append(event.sessionId, { ts: event.ts, sessionId: "hub", source: "hub", type: "scope.set", scope: this.state.scope });
     }
@@ -336,6 +547,8 @@ export class Hub {
       if (url.pathname === "/state") return json(this.state);
       if (url.pathname === "/sessions") return json(this.listSessions());
       if (url.pathname === "/files") return json(this.listScopeFiles());
+      if (url.pathname === "/settings") return json(this.settingsView());
+      if (url.pathname === "/health") return json(this.health());
       if (url.pathname === "/verify") {
         const id = url.searchParams.get("session");
         if (!id || !this.audit) return json({ ok: false, events: 0, reason: this.audit ? "no session given" : "audit log disabled" });
@@ -359,6 +572,7 @@ export class Hub {
               if (HUB_ONLY_EVENTS.includes(e?.type) || VALIDATOR_ONLY_EVENTS.includes(e?.type)) continue;
               // External callers can only speak as the agent (mcp) or the demo.
               const source = e.source === "demo" ? "demo" : "mcp";
+              if (source === "mcp") this.seen.mcp = Date.now();
               const event = { ts: Date.now(), ...e, source } as SpectraEvent;
               // The MCP server's default session ("mcp") joins the live session, so the agent's
               // findings land in that session's record, replay and report.
@@ -370,10 +584,12 @@ export class Hub {
             // Only the Navigator speaks here, and only in leads and finding verdicts.
             for (const e of Array.isArray(body) ? body : [body]) {
               if (!VALIDATOR_ONLY_EVENTS.includes(e?.type)) continue;
+              this.seen.validator = Date.now();
               this.publish({ ts: Date.now(), ...e, source: "validator" } as SpectraEvent);
             }
           } else if (url.pathname === "/import") {
             if (!Array.isArray(body?.entries)) return void res.writeHead(400).end("expected { entries: [...] }");
+            this.seen.import = Date.now();
             return json(this.importTraffic(body.entries, body));
           } else if (url.pathname === "/scope") {
             // A field left out keeps its current value, so `{ hosts }` alone doesn't clear the paths.
@@ -382,6 +598,14 @@ export class Hub {
             const hosts = Array.isArray(body?.hosts) ? body.hosts : current?.hosts;
             const origin = Array.isArray(body?.paths) ? "config" : (current?.origin ?? "session");
             this.setScope(makeScope({ paths, hosts }, origin), "operator");
+          } else if (url.pathname === "/settings") {
+            return json(this.updateSettings(body?.navigator ?? {}));
+          } else if (url.pathname === "/navigator/test") {
+            return void this.testNavigator().then(json);
+          } else if (url.pathname === "/engagement/new") {
+            this.newEngagement();
+          } else if (url.pathname === "/triage") {
+            if (!this.triage(body?.nodeId, body?.state ?? null, body?.note)) return void res.writeHead(400).end("unknown target or state");
           } else if (url.pathname === "/review") {
             if (!this.review(body.findingId, body.verdict, body.note)) return void res.writeHead(400).end("unknown finding or verdict");
           } else {

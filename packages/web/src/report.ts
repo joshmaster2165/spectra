@@ -1,4 +1,6 @@
-import { SEVERITY_RANK, type AuditVerification, type GraphState, type Severity } from "@spectra/schema";
+import { SEVERITY_RANK, TRIAGE_LABEL, type AuditVerification, type GraphState, type Severity } from "@spectra/schema";
+import { STATUS_LABEL } from "./components/Status.tsx";
+import { indexSurface } from "./filters.ts";
 import { formatTool } from "./format.ts";
 import { fetchVerification } from "./components/AuditStatus.tsx";
 
@@ -44,12 +46,15 @@ export function buildReport(state: GraphState, audit?: AuditVerification): strin
   if (!findings.length) out.push(`| — | 0 | | | |`);
   out.push("", `Scope violations: ${violations.length} (${violations.filter((v) => v.severity === "high").length} high).`, "");
 
+  out.push(...surfaceSection(state));
+
   out.push(`## Findings`, "");
   if (!findings.length) out.push("No findings were reported.", "");
   for (const f of findings) {
     out.push(`### ${f.id}: ${f.title}`, "");
     out.push(`- Severity: **${f.severity}**, agent confidence ${Math.round((f.confidence ?? 0) * 100)}%`);
     out.push(`- Agent status: ${f.status}${f.reportedBy === "mcp" ? " (agent-reported)" : ""}`);
+    if (f.assessment) out.push(`- Navigator: ${verdict(f.assessment.verdict)}, ${Math.round(f.assessment.confidence * 100)}%${f.assessment.rationale ? `: ${oneLine(f.assessment.rationale)}` : ""}`);
     out.push(`- Review: **${verdict(f.review?.verdict)}**${f.review?.note ? `: ${oneLine(f.review.note)}` : ""}`);
     if (f.location) out.push(`- Location: \`${f.location.file}${f.location.line ? `:${f.location.line}` : ""}\``);
     out.push("");
@@ -88,8 +93,46 @@ export function buildReport(state: GraphState, audit?: AuditVerification): strin
     out.push("Not verified (audit log unavailable).", "");
   }
 
-  out.push("---", "", "_Findings marked agent-reported are the agent's own claims. Review verdicts are the operator's. Shell-derived targets are pattern-matched and may be incomplete._", "");
+  out.push("---", "", "_Findings marked agent-reported are the agent's own claims. Review verdicts and triage marks are the operator's. Navigator entries are a second model's advice. Tags are name-based heuristics, not findings. Shell-derived targets are pattern-matched and may be incomplete._", "");
   return out.join("\n");
+}
+
+/** The mapped surface, host by host, with tags, the Navigator's lead and the operator's triage — the handoff to the next phase. */
+function surfaceSection(state: GraphState): string[] {
+  const index = indexSurface(state);
+  const nodes = Object.values(state.nodes);
+  const hosts = nodes.filter((n) => n.category === "hosts" && (n.id.startsWith("domain:") || n.id.startsWith("host:")));
+  const out: string[] = [`## Attack surface`, ""];
+  if (!index.counts.endpoints && !hosts.length) return [...out, "No hosts or endpoints were mapped.", ""];
+
+  const marks = Object.values(state.triage);
+  const count = (s: string) => marks.filter((m) => m.state === s).length;
+  out.push(`${index.counts.hosts} hosts, ${index.counts.endpoints} endpoints, ${index.counts.params} parameters.`);
+  if (marks.length) out.push(`Triage: ${count("queued")} to test, ${count("testing")} testing, ${count("tested")} tested, ${count("skipped")} skipped.`);
+  out.push("");
+
+  const source = (seen: unknown) => (seen === "proxy traffic" ? "proxy" : seen === "agent and proxy traffic" ? "agent + proxy" : "agent");
+  for (const h of hosts) {
+    const endpoints = nodes.filter((n) => n.category === "endpoints" && n.parentId === h.id);
+    if (!endpoints.length && !state.triage[h.id]) continue;
+    const tags = index.tags.get(h.id) ?? [];
+    out.push(`### ${h.label}${h.outOfScope ? " (out of scope)" : ""}${tags.length ? ` — ${tags.join(", ")}` : ""}`, "");
+    if (state.triage[h.id]) out.push(`Triage: ${TRIAGE_LABEL[state.triage[h.id].state]}${state.triage[h.id].note ? `: ${oneLine(state.triage[h.id].note!)}` : ""}`, "");
+    if (!endpoints.length) continue;
+    out.push(`| Endpoint | Tags | Status | Seen by | Parameters | Navigator | Triage |`, `|---|---|---|---|---|---|---|`);
+    for (const e of endpoints) {
+      const params = nodes.filter((n) => n.category === "params" && n.parentId === e.id).map((n) => n.label);
+      const lead = index.leads.get(e.id);
+      const mark = state.triage[e.id];
+      out.push(
+        `| \`${cell(e.label)}\` | ${(index.tags.get(e.id) ?? []).join(", ")} | ${STATUS_LABEL[e.status]} | ${source(e.meta?.["seen in"])} | ${cell(params.join(", "))} | ` +
+          `${lead ? `${lead.recommendation} ${Math.round(lead.confidence * 100)}%${lead.bugClass ? ` (${cell(lead.bugClass)})` : ""}` : ""} | ` +
+          `${mark ? `${TRIAGE_LABEL[mark.state]}${mark.note ? `: ${cell(oneLine(mark.note))}` : ""}` : ""} |`,
+      );
+    }
+    out.push("");
+  }
+  return out;
 }
 
 export async function downloadReport(state: GraphState) {

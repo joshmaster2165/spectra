@@ -1,12 +1,12 @@
 # Security
 
-Spectra watches an AI agent do security testing, so it handles sensitive material — commands, URLs, file paths, your prompts — and its records may later serve as evidence of what happened. This page describes how it protects that material and where the protection stops: the hub is local-only and refuses other web origins; every event is labelled with a source that's trusted differently; scope checks flag boundary crossings but have known blind spots; and a hash-chained audit log makes after-the-fact edits detectable. It also lists what is stored where, how to clear it, and the rules for responsible use. To report a vulnerability in Spectra itself, see [SECURITY.md](../SECURITY.md).
+Spectra watches an AI agent do security testing, so it handles sensitive material — commands, URLs, file paths, your prompts — and its records may later serve as evidence of what happened. This page describes how it protects that material and where the protection stops: the hub is local-only and refuses other web origins; every event is labelled with a source that's trusted differently; scope checks flag boundary crossings but have known blind spots; and a hash-chained audit log makes after-the-fact edits detectable. It also covers how the Navigator's API key is kept, lists what is stored where and how to clear it, and gives the rules for responsible use. To report a vulnerability in Spectra itself, see [SECURITY.md](../SECURITY.md).
 
 ## Local only
 
 - **Loopback binding.** The hub listens on `127.0.0.1` only. Nothing on your network can reach it.
 - **Origin checks.** Every HTTP request and every WebSocket connection carrying an `Origin` header is refused unless the origin's host is `localhost`, `127.0.0.1` or `[::1]`. A web page on any other site can't read the agent's activity from the hub or post events to it, even though your browser can reach `127.0.0.1`. Requests without an `Origin` — curl, the hook, the MCP server, the importer — are allowed.
-- **What leaves your machine.** The hub makes no outbound connections. The [Navigator](navigator.md) is the only part that sends Spectra data anywhere — to the Anthropic API — and it's opt-in. The demos and the proxy importer only talk to your local hub. The dashboard's stylesheet loads its fonts from Google Fonts, so your browser fetches those.
+- **What leaves your machine.** The [Navigator](navigator.md) is the only part that sends Spectra data anywhere — to the Anthropic API — and it's opt-in. By default the hub makes no outbound connections. It makes them only when you turn the Navigator on in Settings, where the hub itself calls the Anthropic API, and once each time you click **Test connection**. Run the Navigator with `npm run validator` instead and that process makes the calls, not the hub. The demos and the proxy importer only talk to your local hub. The dashboard's stylesheet loads its fonts from Google Fonts, so your browser fetches those.
 
 ## Observation, not control
 
@@ -22,12 +22,14 @@ Every event carries the source it came through, and the hub — not the caller �
 | Claims | `mcp`, `demo` | What the agent (or a script) says. Findings are shown as *agent-reported*. |
 | Observed traffic | `proxy` | What crossed the wire, per imported proxy history. |
 | Advice | `validator` | The Navigator's leads and verdicts. |
-| Authority | `operator` | Your verdicts on findings, and scope you post to `/scope`. |
+| Authority | `operator` | Your verdicts on findings, your triage marks, and scope you set in Settings or post to `/scope`. |
 | Derived | `hub` | Scope from the config file or session directories, violations, and fix edits the hub links to findings. |
 
-The hub keeps the channels apart: the agent's annotation channel (`POST /events`) can't produce scope changes, violations, operator verdicts, fix links, or Navigator output; the Navigator's channel (`POST /validator`) can only produce leads and verdicts. The dashboard shows the agent's claim, the Navigator's verdict and your review side by side and never merges them. The full mapping is in the [Reference](reference.md#sources-and-trust).
+The hub keeps the channels apart: the agent's annotation channel (`POST /events`) can't produce scope changes, violations, operator verdicts, triage marks, fix links, or Navigator output; the Navigator — in the hub or on its own channel (`POST /validator`) — can only produce leads and verdicts. The dashboard shows the agent's claim, the Navigator's verdict and your review side by side and never merges them. The full mapping is in the [Reference](reference.md#sources-and-trust).
 
-**The limit:** these are separate channels, not authenticated ones. Any process running as you on this machine can post to any route — including `/hooks`, whose events are treated as ground truth, `/scope` and `/review`. Source labels show *which channel* an event used, not *who* sent it.
+**Triage marks are operator-only.** A `target.triage` event is one the hub writes itself, when you set a mark in the dashboard (`POST /triage`), and it's stamped `operator`. The agent has no tool for it, the hub drops the event type if it arrives on `/events`, and the Navigator can't produce it — so a mark on the map is yours. The Navigator can read your marks; it can't change them.
+
+**The limit:** these are separate channels, not authenticated ones. Any process running as you on this machine can post to any route — including `/hooks`, whose events are treated as ground truth, `/scope`, `/review`, `/triage` and `/settings`. Source labels show *which channel* an event used, not *who* sent it.
 
 ## Scope checks
 
@@ -109,21 +111,35 @@ FAIL  3f2a…  recorded head c5a9a562104f3ab3… is not in the log (log was rewr
 
 - The chain proves the log hasn't changed since it was written; it doesn't prove each event was true when it arrived. Events injected live by a local process are chained like any other — the source labels are what tell you how much to trust them.
 - Without a head hash kept elsewhere, a full rewrite is undetectable.
-- MCP annotations are recorded under their own session id (`mcp` by default), so they're in a separate log from the Claude Code session they relate to.
+- MCP annotations join the live Claude Code session's log. Ones reported before any session has started, or from a server registered with its own `SPECTRA_SESSION`, are in a separate log (`mcp`, or that id).
 - With `SPECTRA_PERSIST=0`, nothing is written and there's nothing to verify.
+
+## The Navigator's API key
+
+When you save a key in **Settings**, this is what happens to it:
+
+- **It's stored in one file.** `~/.spectra/settings.json` (or the file named by `SPECTRA_SETTINGS`), written owner-only (`0600`), in a directory created owner-only (`0700`). It's stored as plain text, like other credential files in your home directory — protect it the same way.
+- **It's never sent back to the browser.** The key is write-only through the hub's API: `GET /settings` and `GET /health` return only whether a key is available, whether it came from Settings or the environment, and its last four characters. The dashboard's key field is a password field that's emptied after saving.
+- **It goes to the Anthropic API and nowhere else.** The hub uses it for the Navigator's model calls and for **Test connection**. It isn't written to the audit log, the report or the hub's terminal.
+- **Removing it.** **Remove** in Settings deletes the key from the file and turns the Navigator off. Deleting the file while the hub is stopped does the same.
+- **A key in the environment.** If you'd rather the key never touch the disk, start the hub with `ANTHROPIC_API_KEY` set and don't save one in Settings; the hub uses the environment's key when none is saved.
+
+Two limits to know. The settings file is written even when the audit log is off (`SPECTRA_PERSIST=0`). And `POST /settings` is open to any local process, like every other route: something running as you could replace the saved key or model, or turn the Navigator on when a key is available — which starts sending digests of the map to the Anthropic API. It can't read the key back through the hub, but a process running as you can read the file itself.
 
 ## What is stored where
 
 | Where | What | Cleared by |
 |---|---|---|
-| `~/.spectra/sessions/*.jsonl` (`SPECTRA_DATA_DIR`) | Every event, per session: file paths; each tool call's main argument — the full shell command, the full URL the agent requested **including its query string**, search patterns; your prompts; the agent's reasoning (up to 400 characters per entry); findings, reviews, leads and verdicts; parameter names and URLs (without query strings) from proxy imports. | Deleting the files. |
-| The hub's memory | The current map and up to 50,000 recent events. | Restarting the hub. |
+| `~/.spectra/sessions/*.jsonl` (`SPECTRA_DATA_DIR`) | Every event, per session: file paths; each tool call's main argument — the full shell command, the full URL the agent requested **including its query string**, search patterns; your prompts; the agent's reasoning (up to 400 characters per entry); findings, reviews, your triage marks and notes, leads and verdicts; parameter names and URLs (without query strings) from proxy imports. | Deleting the files. |
+| `~/.spectra/settings.json` (`SPECTRA_SETTINGS`) | The Navigator's API key, if you saved one in Settings, its model, and whether it's on. See [The Navigator's API key](#the-navigators-api-key). | **Remove** in Settings (the key), or deleting the file. |
+| `~/.spectra/sessions/_engagement.json` | The ids of the sessions on the live map, and when the engagement began. No activity data. | **New engagement** in Settings, or deleting the file. |
+| The hub's memory | The current map and up to 50,000 recent events, rebuilt from the engagement's audit logs when the hub starts. | **New engagement** in Settings (with the audit log off, restarting the hub). |
 | Claude Code's settings | The hook entries, in `.claude/settings.local.json` or `~/.claude/settings.json`. | `npm run hooks:install -- … --remove`. |
 | Claude Code's MCP configuration | The `spectra` server entry. | `claude mcp remove spectra`. |
 | Your downloads folder | Reports you export. | You. |
-| The Anthropic API | The Navigator's digests, while it runs. See [Navigator → Cost and egress](navigator.md#cost-and-egress). | Not running the Navigator. |
+| The Anthropic API | The Navigator's digests, while it runs — in the hub or as a separate process. See [Navigator → Cost and egress](navigator.md#cost-and-egress). | Not running the Navigator. |
 
-**Not stored:** file contents and patches (the hook strips them, and only a tool's main argument is ever recorded), the rest of a tool's input, and anything from a HAR file other than methods, URLs without query strings, status codes, content types and parameter names. The dashboard keeps nothing in the browser.
+**Not stored:** file contents and patches (the hook strips them, and only a tool's main argument is ever recorded), the rest of a tool's input, and anything from a HAR file other than methods, URLs without query strings, status codes, content types and parameter names. The dashboard keeps nothing in the browser, the API key included.
 
 Treat the audit log like shell history: it can contain secrets that appeared on a command line or in a URL the agent requested. To clear it, stop the hub and delete `~/.spectra/sessions` (or individual session files). That can't be undone, and it destroys the evidence those logs provide — archive them first if you might need them. Claude Code's own transcripts in `~/.claude/projects` belong to Claude Code; Spectra only reads them.
 

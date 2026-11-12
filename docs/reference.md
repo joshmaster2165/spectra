@@ -1,10 +1,10 @@
 # Reference
 
-This page is the exact contract: the five MCP tools the agent can call and every parameter they take, every route on the hub's HTTP and WebSocket API with its method, body and response, the event types that flow through the hub, the node-id conventions that make different sources land on the same target, and the trust model — which source each event comes from and how much weight it carries. It's drawn from `packages/server/src/mcp.ts`, `packages/server/src/hub.ts` and `packages/schema/src/index.ts`.
+This page is the exact contract: the five MCP tools the agent can call and every parameter they take, every route on the hub's HTTP and WebSocket API with its method, body and response, the event types that flow through the hub, the node-id conventions that make different sources land on the same target, the rules behind the automatic surface tags, and the trust model — which source each event comes from and how much weight it carries. It's drawn from `packages/server/src/mcp.ts`, `packages/server/src/hub.ts` and `packages/schema/src/index.ts`.
 
 ## MCP tools
 
-The MCP server (`packages/server/src/mcp.ts`) runs over stdio, launched by Claude Code. Each call is forwarded to the hub's `POST /events` as one or more events with the source `mcp`. The server sends the session id `mcp` (or `SPECTRA_SESSION`); the hub attaches events sent under the default `mcp` to the live Claude Code session, so the agent's annotations and findings land in that session's record, replay and report. Every tool returns a short text confirmation; if the hub can't be reached, the error goes to stderr and the tool still returns its confirmation. There is deliberately no tool for scope, operator verdicts or Navigator output.
+The MCP server (`packages/server/src/mcp.ts`) runs over stdio, launched by Claude Code. Each call is forwarded to the hub's `POST /events` as one or more events with the source `mcp`. The server sends the session id `mcp` (or `SPECTRA_SESSION`); the hub attaches events sent under the default `mcp` to the live Claude Code session, so the agent's annotations and findings land in that session's record, replay and report. Every tool returns a short text confirmation; if the hub can't be reached, the error goes to stderr and the tool still returns its confirmation. There is deliberately no tool for scope, operator verdicts, triage marks or Navigator output.
 
 Register it from the Spectra root:
 
@@ -23,7 +23,7 @@ Add or update a target on the attack-surface map — a host, subdomain, API endp
 | `kind` | `root` \| `category` \| `leaf` | no | `leaf` | Node kind. |
 | `status` | `unexplored` \| `active` \| `complete` | no | `active` | Status, shown as grey, orange or green. |
 | `parentId` | string | no | | Parent target's id. Draws a containment edge. |
-| `category` | string | no | | Grouping key. The dashboard treats `hosts`, `endpoints` and `params` as attack surface (Surface table, always-on labels). |
+| `category` | string | no | | Grouping key. The dashboard treats `hosts`, `endpoints` and `params` as attack surface (Surface table, the Graph's Surface layer, tags, always-on labels). |
 | `importance` | integer 1–5 | no | | Shown as importance bars; sorts **Activity → Objects**. |
 | `note` | string | no | | Why it matters. Also posted as a thought (reason `node <id>`) in the activity stream. |
 
@@ -115,6 +115,8 @@ The hub listens on `http://127.0.0.1:4317` (`SPECTRA_PORT`). Every route refuses
 | GET | [`/history`](#get-history) | Events, for replay |
 | GET | [`/verify`](#get-verify) | Check a session's audit log |
 | GET | [`/files`](#get-files) | Files under the scope paths |
+| GET | [`/settings`](#get-settings) | Navigator settings and status, without the key |
+| GET | [`/health`](#get-health) | What's connected, for the setup checklist |
 | GET | `/*` | The built dashboard |
 | POST | [`/hooks`](#post-hooks) | Claude Code hook payloads |
 | POST | [`/events`](#post-events) | Agent and demo annotations |
@@ -122,6 +124,10 @@ The hub listens on `http://127.0.0.1:4317` (`SPECTRA_PORT`). Every route refuses
 | POST | [`/import`](#post-import) | Proxy history |
 | POST | [`/scope`](#post-scope) | Set the scope |
 | POST | [`/review`](#post-review) | Operator verdict on a finding |
+| POST | [`/triage`](#post-triage) | Operator's triage mark on a target |
+| POST | [`/engagement/new`](#post-engagementnew) | Clear the live map and start a new engagement |
+| POST | [`/settings`](#post-settings) | Change the Navigator's key, model or on/off |
+| POST | [`/navigator/test`](#post-navigatortest) | Check the saved key and model |
 | WS | [`/ws`](#ws-ws) | Live state stream |
 
 ### GET /state
@@ -136,6 +142,7 @@ Returns the current `GraphState`:
   chain: Record<string, ChainStep>;       // { id, chainId, title, detail?, nodeIds?, after?, confirmed? }
   findings: Record<string, Finding>;      // includes review?, assessment?, edits?, reportedBy?, sessionId?
   assessments: Record<string, Assessment>;// Navigator leads, keyed "nav:<nodeId>"
+  triage: Record<string, Triage>;         // operator's marks, keyed by node id: { state, note?, ts }
   scope?: { paths: string[]; hosts: string[]; origin: "config" | "session" };
   violations: ScopeViolation[];           // { id, ts, sessionId, toolUseId, tool, nodeId?, target, severity, summary }
   files: Record<string, { reads: number; writes: number; lastTs: number }>;
@@ -143,6 +150,8 @@ Returns the current `GraphState`:
   timeline: SpectraEvent[];               // the most recent 500 events
 }
 ```
+
+A triage `state` is `queued` (shown as *To test*), `testing`, `tested` or `skipped` (*Skip*). [Surface tags](#surface-tags) aren't part of the state; they're computed from names when shown.
 
 ### GET /sessions
 
@@ -182,6 +191,58 @@ Lists the files under each scope path, for the Files view:
 
 Skips `node_modules`, `.git`, `dist`, `build`, `.next`, `vendor`, `__pycache__`, `.venv`, `venv`, `target` and `coverage`, doesn't follow symlinks, and stops at 20,000 files per root (`truncated: true`).
 
+### GET /settings
+
+The Navigator's settings as the dashboard may see them, and the status of the Navigator in the hub. The API key itself is never returned — only whether one is available, where it comes from, and its last four characters.
+
+```json
+{
+  "navigator": {
+    "enabled": true,
+    "model": "claude-opus-5-5",
+    "hasKey": true,
+    "keySource": "settings",
+    "keyHint": "…abcd",
+    "status": { "state": "idle", "model": "claude-opus-5-5", "runs": 3, "lastRun": 1794430185300, "lastPosted": 7 }
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `enabled` | Whether **Run the Navigator in the hub** is on. |
+| `model` | The saved model, else `SPECTRA_VALIDATOR_MODEL` in the hub's environment, else `claude-opus-5-5`. |
+| `hasKey` | A key is saved, or `ANTHROPIC_API_KEY` is set in the hub's environment. |
+| `keySource` | `"settings"`, `"environment"` or `null`. |
+| `keyHint` | `…` and the key's last four characters, or `null`. |
+| `status.state` | `off`, `idle` (shown as *Running*), `assessing` or `error` (shown as *Stopped*). See [Navigator → States](navigator.md#states). |
+| `status.runs`, `lastRun`, `lastPosted` | Assessments completed since the Navigator last started, the time of the last one, and how many leads and verdicts it posted. |
+| `status.lastError` | The most recent error, when there is one. |
+
+### GET /health
+
+What has reached the hub, for the [setup checklist](dashboard.md#setup-checklist):
+
+```json
+{
+  "hub": { "startedAt": 1794430100000, "events": 84 },
+  "scope": { "set": true, "origin": "config", "paths": 1, "hosts": 4 },
+  "hooks": { "lastSeen": 1794430185300, "sessions": 1 },
+  "observer": { "enabled": true },
+  "mcp": { "lastSeen": null },
+  "proxy": { "lastImport": 1794430170000 },
+  "navigator": { "enabled": true, "model": "claude-opus-5-5", "hasKey": true, "keySource": "settings", "keyHint": "…abcd", "status": { "state": "idle", "model": "claude-opus-5-5", "runs": 1 }, "externalLastSeen": null },
+  "audit": { "enabled": true, "dir": "~/.spectra/sessions" },
+  "engagement": { "started": 1794420000000, "sessions": 2, "restored": { "events": 84, "sessions": 2 } }
+}
+```
+
+- `scope` is `{ "set": false }` before any scope exists; `paths` and `hosts` are counts.
+- `hooks.lastSeen`, `mcp.lastSeen` and `proxy.lastImport` are the times of the last hook payload, the last `mcp`-sourced post to `/events`, and the last `POST /import` since the hub started, or `null`. `hooks.sessions` counts the sessions that have reported through hooks.
+- `engagement` is when the current [engagement](dashboard.md#engagement) began, how many sessions are in it, and what was restored from the audit logs when the hub started (`restored` is `null` if nothing was). The whole field is `null` with the audit log off.
+- `navigator` is the same object as in `GET /settings`, plus `externalLastSeen`: the last time anything was accepted on `POST /validator` — a separate `npm run validator` process, or a demo.
+- `audit.dir` is `null` when the audit log is off; your home directory is shortened to `~`.
+
 ### GET /*
 
 Any other GET path serves the built dashboard from `packages/web/dist`, falling back to `index.html`. If the dashboard hasn't been built, it returns **404** `dashboard not built: run npm run build`.
@@ -204,7 +265,7 @@ A Claude Code hook payload, as sent by `packages/server/bin/spectra-hook.mjs`:
 
 `prompt` is included for `UserPromptSubmit` and `reason` for `SessionEnd`.
 
-Handled events: `SessionStart`, `UserPromptSubmit` (the prompt becomes a thought tagged *operator prompt*), `PreToolUse` (a tool call), `PostToolUse` and `PostToolUseFailure` (its result), `SessionEnd`. The hub turns them into events with the source `hook`. A payload without `session_id` is ignored. Responds **202**.
+Handled events: `SessionStart`, `UserPromptSubmit` (the prompt becomes a thought tagged *operator prompt*), `PreToolUse` (a tool call), `PostToolUse` (its result) and `PostToolUseFailure` (its result, always a failure), `SessionEnd`. These are the six events `npm run hooks:install` registers. The hub turns them into events with the source `hook`. A payload without `session_id` is ignored. Responds **202**.
 
 ### POST /events
 
@@ -215,7 +276,7 @@ One event or an array of events (see [Events](#events)) from the MCP server or a
 ```
 
 - The source is forced to `mcp`, unless the event says `"source": "demo"`. Any other source is replaced.
-- Events of the hub-only types (`scope.set`, `scope.violation`, `finding.review`, `finding.edit`) and the Navigator-only types (`assessment.upsert`, `finding.assessment`) are silently dropped.
+- Events of the hub-only types (`scope.set`, `scope.violation`, `finding.review`, `finding.edit`, `target.triage`) and the Navigator-only types (`assessment.upsert`, `finding.assessment`) are silently dropped.
 - `ts` defaults to the time of receipt.
 - A `finding.upsert` is stamped `reportedBy` with the source.
 
@@ -223,7 +284,7 @@ Responds **202**, including when events were dropped.
 
 ### POST /validator
 
-One event or an array, from the Navigator. Only `assessment.upsert` and `finding.assessment` are accepted; anything else is dropped. Events are stamped with the source `validator`; `ts` defaults to the time of receipt.
+One event or an array, from a Navigator running as a separate process (`npm run validator`). The Navigator in the hub doesn't use this route; it publishes the same two event types directly. Only `assessment.upsert` and `finding.assessment` are accepted; anything else is dropped. Events are stamped with the source `validator`; `ts` defaults to the time of receipt.
 
 ```json
 [
@@ -285,6 +346,53 @@ Your verdict on a finding:
 
 `verdict` is `verified`, `rejected` or `needs-info`; `note` is optional (up to 2,000 characters). Recorded as a `finding.review` event with the source `operator`. Responds **202**, or **400** `unknown finding or verdict`.
 
+### POST /triage
+
+Your triage mark on a target:
+
+```json
+{ "nodeId": "endpoint:api.example-shop.test/api/users/:id", "state": "queued", "note": "Try with a second account." }
+```
+
+| Field | Notes |
+|---|---|
+| `nodeId` | Required. The id of a target on the map. |
+| `state` | `queued`, `testing`, `tested` or `skipped`. `null`, or leaving it out, clears the mark and its note. |
+| `note` | Optional, up to 2,000 characters. Each post replaces the whole mark, so send the note again to keep it. |
+
+Recorded as a `target.triage` event with the source `operator`, under the most recent session (or the id `operator` if no session has started). Responds **202**, or **400** `unknown target or state`.
+
+### POST /engagement/new
+
+Clears the live map and starts a new [engagement](dashboard.md#engagement). Takes an empty JSON object (`{}`). Every connected dashboard receives a fresh snapshot; the scope goes back to the config file's. Audit logs aren't touched. Responds **202**.
+
+### POST /settings
+
+Changes the Navigator's settings. Send only the fields you want to change:
+
+```json
+{ "navigator": { "apiKey": "sk-ant-...", "model": "claude-opus-5-5", "enabled": true } }
+```
+
+| Field | Notes |
+|---|---|
+| `apiKey` | A string of up to 400 characters with no whitespace. An empty string clears the saved key. |
+| `model` | Up to 80 characters: letters, digits, `_`, `.`, `:` and `-`. An empty string clears the saved model, going back to the default. |
+| `enabled` | `true` or `false`. The Navigator only runs when it's enabled **and** a key is available. |
+
+A field that fails its check is ignored, not rejected. The settings are written to the [settings file](configuration.md#the-settings-file), and the Navigator in the hub is restarted with them. Responds **200** with the same body as [`GET /settings`](#get-settings) — the key is never echoed back.
+
+### POST /navigator/test
+
+Sends one tiny request to the Anthropic API with the saved key and model (or the ones in the hub's environment). The body is ignored, but must be valid JSON — send `{}`. Responds **200**:
+
+```json
+{ "ok": true }
+{ "ok": false, "error": "The API key was rejected." }
+```
+
+Without a key it answers `{ "ok": false, "error": "Add an API key first." }` and makes no request.
+
 ### Errors
 
 | Status | When |
@@ -324,12 +432,27 @@ Every event has `ts` (milliseconds since the epoch), `sessionId`, `source` and `
 | `scope.violation` | `violation` | Hub only |
 | `finding.edit` | `findingId`, `edit` | Hub only |
 | `finding.review` | `findingId`, `review` | Hub only, from `POST /review` |
-| `assessment.upsert` | `assessment` | Navigator only, via `POST /validator` |
-| `finding.assessment` | `findingId`, `assessment` | Navigator only, via `POST /validator` |
+| `target.triage` | `nodeId`, `triage` (`{ state, note?, ts }`, or `null` to clear the mark) | Hub only, from `POST /triage` |
+| `assessment.upsert` | `assessment` | Navigator only: the Navigator in the hub, or `POST /validator` |
+| `finding.assessment` | `findingId`, `assessment` | Navigator only: the Navigator in the hub, or `POST /validator` |
 
 A `tool.call`'s `targets` are what scope checks run on: `{ kind: "path" | "host", value, access: "read" | "write" | "exec" | "network", heuristic?, url? }`. `heuristic: true` marks a target pattern-matched out of a shell command.
 
 The hub de-duplicates `tool.call` and `tool.result` by `toolUseId`, and drops the observer's tool events for any session that reports through hooks (keeping its reasoning).
+
+## Surface tags
+
+Tags are labels for hosts and endpoints, computed from names by `surfaceTags(route, host)` in `@spectra/schema`. They aren't events and aren't stored in the state or the audit log: the dashboard and the report work them out each time, so a change to the rules applies to old sessions too.
+
+The eleven tags are `api`, `graphql`, `auth`, `admin`, `internal`, `exposed`, `docs`, `files`, `payments`, `webhook` and `object-id`. Each has a pattern for the route, the hostname, or both; a target gets every tag whose pattern matches, compared in lower case.
+
+| Target | Tagged from |
+|---|---|
+| Endpoint | Its route (the node's label) and its host (its parent's label). |
+| Domain or subdomain | Its hostname only. |
+| Parameter | Nothing of its own; it takes its endpoint's tags. |
+
+[Dashboard → Tags](dashboard.md#tags) lists what each tag matches. Tags are heuristics for sorting and filtering, not findings.
 
 ## Sources and trust
 
@@ -342,13 +465,13 @@ Every event carries the source it arrived through, and the hub decides the sourc
 | `mcp` | `POST /events` (default) | Discoveries, links, chain steps, findings, thoughts | **Claims** — the agent's word; findings are labelled *agent-reported* |
 | `demo` | `POST /events` with `"source": "demo"` | Scripted sessions | **Claims** — a script's word |
 | `proxy` | `POST /import` | Hosts, endpoints and parameter names | **Observed traffic** — what crossed the wire, not what the agent did |
-| `validator` | `POST /validator` | Leads and finding verdicts | **Advice** — a second model's read |
-| `operator` | `POST /review`, `POST /scope` | Finding verdicts and scope changes | **Authority** — yours |
+| `validator` | The Navigator in the hub, or `POST /validator` | Leads and finding verdicts | **Advice** — a second model's read |
+| `operator` | `POST /review`, `POST /scope`, `POST /triage`, `POST /engagement/new` | Finding verdicts, scope changes, triage marks and clearing the map | **Authority** — yours |
 | `hub` | The hub itself | Scope from the config file or session directories, scope violations, linked fix edits | **Derived** — the hub's own records |
 
 Channel rules the hub enforces:
 
-- `/events` can't produce scope, violations, reviews, fix links, leads or verdicts.
+- `/events` can't produce scope, violations, reviews, triage marks, fix links, leads or verdicts.
 - `/validator` can only produce leads and verdicts.
 - `/hooks` can only produce what the hook translator emits from a hook payload.
 

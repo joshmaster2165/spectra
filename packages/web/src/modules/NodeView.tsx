@@ -1,5 +1,7 @@
-import type { GraphState, MapNode, SpectraEvent } from "@spectra/schema";
-import { ImportanceBars, StatusChip } from "../components/Status.tsx";
+import { useContext, useEffect, useState } from "react";
+import { TRIAGE_LABEL, type GraphState, type MapNode, type SpectraEvent, type Triage, type TriageState } from "@spectra/schema";
+import { Confidence, ImportanceBars, StatusChip } from "../components/Status.tsx";
+import { postTriage, ReadOnly, type SurfaceIndex } from "../filters.ts";
 import { clock, formatTool } from "../format.ts";
 
 type Link = { node: MapNode; dir: "in" | "out"; label: string };
@@ -7,16 +9,20 @@ type Link = { node: MapNode; dir: "in" | "out"; label: string };
 /** Node view: one object's properties, its ego network, connections and activity. */
 export function NodeView({
   state,
+  index,
   nodeId,
   onSelect,
 }: {
   state: GraphState;
+  index: SurfaceIndex;
   nodeId?: string;
   onSelect: (id: string) => void;
 }) {
   const node =
     (nodeId && state.nodes[nodeId]) || Object.values(state.nodes).find((n) => n.kind === "root");
-  if (!node) return <div className="empty">Select an object in Network or Hierarchy.</div>;
+  if (!node) return <div className="empty">Select a target in Graph, Tree or Surface.</div>;
+  const tags = index.tags.get(node.id) ?? [];
+  const lead = index.leads.get(node.id);
 
   const links: Link[] = [];
   for (const e of Object.values(state.edges)) {
@@ -51,6 +57,11 @@ export function NodeView({
         <h3>{node.label}</h3>
         <StatusChip status={node.status} />
         {node.outOfScope && <span className="oob-tag">out of scope</span>}
+        {tags.map((t) => (
+          <span key={t} className={`tag small ${t}`}>
+            {t}
+          </span>
+        ))}
       </div>
 
       <div className="nv-grid">
@@ -67,6 +78,23 @@ export function NodeView({
             ))}
           </dl>
         </section>
+
+        <section>
+          <h4>Your triage</h4>
+          <TriageForm key={node.id} nodeId={node.id} triage={state.triage[node.id]} />
+        </section>
+
+        {lead && (
+          <section>
+            <h4>Navigator's lead</h4>
+            <div className="nv-lead">
+              <span className={`rec ${lead.recommendation}`}>{lead.recommendation}</span>
+              <Confidence value={lead.confidence} />
+              {lead.bugClass && <span className="bugclass">{lead.bugClass}</span>}
+            </div>
+            {lead.rationale && <p className="lead-rationale flush">{lead.rationale}</p>}
+          </section>
+        )}
 
         {violations.length > 0 && (
           <section>
@@ -126,6 +154,46 @@ export function NodeView({
           {!activity.length && !steps.length && <p className="muted">No recorded activity.</p>}
         </section>
       </div>
+    </div>
+  );
+}
+
+/** The operator's own mark and note on a target: what to test, what's done, what to leave. */
+function TriageForm({ nodeId, triage }: { nodeId: string; triage?: Triage }) {
+  const [note, setNote] = useState(triage?.note ?? "");
+  const [error, setError] = useState(false);
+  const readOnly = useContext(ReadOnly);
+  useEffect(() => setNote(triage?.note ?? ""), [triage?.ts]);
+  const mark = async (state: TriageState | null) => setError(!(await postTriage(nodeId, state, state ? note : undefined)));
+  if (readOnly)
+    return (
+      <p className="hint">
+        {triage ? `${TRIAGE_LABEL[triage.state]}${triage.note ? ` — ${triage.note}` : ""}.` : "Not marked."} Triage is read-only during replay.
+      </p>
+    );
+  return (
+    <div className="review triage-form">
+      <div className="review-actions">
+        {(Object.keys(TRIAGE_LABEL) as TriageState[]).map((t) => (
+          <button key={t} className={`triage-btn ${t} ${triage?.state === t ? "on" : ""}`} onClick={() => mark(t)}>
+            {TRIAGE_LABEL[t]}
+          </button>
+        ))}
+        {triage && (
+          <button className="triage-btn" onClick={() => mark(null)}>
+            Clear
+          </button>
+        )}
+        {error && <span className="alert-text">Couldn't reach the hub.</span>}
+      </div>
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note: what to try, which account, what you saw…" rows={2} />
+      {triage && note !== (triage.note ?? "") && (
+        <div className="review-actions">
+          <button className="triage-btn on" onClick={() => mark(triage.state)}>
+            Save note
+          </button>
+        </div>
+      )}
     </div>
   );
 }

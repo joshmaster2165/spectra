@@ -80,7 +80,7 @@ Each imported target gets these properties, visible in the [Target](dashboard.md
 
 Two things to know:
 
-- **Re-importing adds up.** Importing the same file twice doubles its request counts. Restart the hub for a clean map.
+- **Re-importing adds up.** Importing the same file twice doubles its request counts. For a clean map, start a new engagement in **Settings** and import once.
 - **Order doesn't matter.** Import before or after the agent works. If the agent later requests an endpoint that only the proxy had seen, the endpoint keeps its traffic details and becomes *seen in agent and proxy traffic* (source *both* in Surface).
 
 ## Try the example

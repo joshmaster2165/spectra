@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSpectra } from "./useSpectra.ts";
 import { useReplay } from "./useReplay.ts";
 import { Logo } from "./components/Logo.tsx";
@@ -16,6 +16,8 @@ import { SurfaceTable } from "./modules/SurfaceTable.tsx";
 import { downloadReport } from "./report.ts";
 import { AuditStatus } from "./components/AuditStatus.tsx";
 import { ImportButton } from "./components/ImportButton.tsx";
+import { SettingsPanel } from "./components/SettingsPanel.tsx";
+import { indexSurface, NO_FILTER, ReadOnly, type SurfaceFilter } from "./filters.ts";
 import { clock } from "./format.ts";
 
 type View = "network" | "hierarchy" | "surface" | "files" | "node";
@@ -36,6 +38,9 @@ export function App() {
   const [selected, setSelected] = useState<string>();
   const [view, setView] = useState<View>("network");
   const [oversightTab, setOversightTab] = useState<OversightTab>("findings");
+  const [filter, setFilter] = useState<SurfaceFilter>(NO_FILTER);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const index = useMemo(() => indexSurface(state), [state.nodes, state.assessments]);
 
   const open = (id: string) => {
     setSelected(id);
@@ -78,6 +83,9 @@ export function App() {
         <button className="ghost" onClick={() => downloadReport(state)} title="Download a Markdown report of this session">
           Report
         </button>
+        <button className="ghost" onClick={() => setSettingsOpen(true)} title="Navigator key and model, scope, and a setup checklist">
+          Settings
+        </button>
         {replay.active ? (
           <span className="field link replaying">
             <span className="dot" />
@@ -97,6 +105,7 @@ export function App() {
 
       {replay.active && <ReplayBar replay={replay} />}
 
+      <ReadOnly.Provider value={replay.active}>
       <main className="grid">
         <Panel
           area="map"
@@ -104,11 +113,11 @@ export function App() {
           controls={<Segmented value={view} options={VIEWS} onChange={setView} />}
           meta={`${nodeCount} targets · ${edgeCount} links`}
         >
-          {view === "network" && <GlobalMap state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
+          {view === "network" && <GlobalMap state={state} index={index} filter={filter} onFilter={setFilter} selected={selected} onSelect={setSelected} onOpen={open} />}
           {view === "hierarchy" && <TreeView state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
-          {view === "surface" && <SurfaceTable state={state} selected={selected} onSelect={setSelected} onOpen={open} />}
+          {view === "surface" && <SurfaceTable state={state} index={index} filter={filter} onFilter={setFilter} selected={selected} onSelect={setSelected} onOpen={open} />}
           {view === "files" && <FilesView state={state} />}
-          {view === "node" && <NodeView state={state} nodeId={selected} onSelect={setSelected} />}
+          {view === "node" && <NodeView state={state} index={index} nodeId={selected} onSelect={setSelected} />}
         </Panel>
 
         <Panel area="ledger" title="Activity" meta={`${state.timeline.length} events`}>
@@ -127,6 +136,9 @@ export function App() {
           <ExplorationSketch state={state} />
         </Panel>
       </main>
+      </ReadOnly.Provider>
+
+      {settingsOpen && <SettingsPanel state={live.state} onClose={() => setSettingsOpen(false)} />}
 
       <footer className="statusbar">
         <span>Hub {location.host}</span>

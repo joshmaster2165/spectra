@@ -61,6 +61,11 @@ export class Translator {
     private emit: (e: SpectraEvent) => void,
   ) {}
 
+  /** After the map is cleared: sessions still running start again from their root. */
+  forget() {
+    this.seenSessions.clear();
+  }
+
   session(sessionId: string, cwd: string | undefined, ts: number, title?: string) {
     if (this.seenSessions.has(sessionId)) return;
     this.seenSessions.add(sessionId);

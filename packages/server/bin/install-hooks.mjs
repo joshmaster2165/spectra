@@ -13,8 +13,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SessionEnd"];
-const MATCHER_EVENTS = new Set(["PreToolUse", "PostToolUse"]);
+// PostToolUseFailure is how Claude Code reports a tool call that failed; without it a failed
+// call never gets a result and its target stays "active" on the map.
+const EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SessionEnd"];
+const MATCHER_EVENTS = new Set(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
 const MARKER = "spectra-hook.mjs";
 
 const args = process.argv.slice(2);

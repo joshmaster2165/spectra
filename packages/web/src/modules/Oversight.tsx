@@ -51,7 +51,7 @@ function Navigator({ state, onSelect }: { state: GraphState; onSelect: (id: stri
   if (!leads.length)
     return (
       <div className="empty">
-        No leads yet. Start the Navigator with <code>npm run validator</code> to have a second model score the map and point at what's worth pursuing.
+        No leads yet. Turn the Navigator on in <strong>Settings</strong> (or run <code>npm run validator</code>) to have a second model score the map and point at what's worth pursuing.
       </div>
     );
   return (

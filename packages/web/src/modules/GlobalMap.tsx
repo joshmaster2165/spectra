@@ -11,6 +11,8 @@ import {
   type SimulationNodeDatum,
 } from "d3-force";
 import type { GraphState, MapNode } from "@spectra/schema";
+import { FilterBar } from "../components/FilterBar.tsx";
+import { isFiltering, isSurface, matchedIds, type SurfaceFilter, type SurfaceIndex } from "../filters.ts";
 
 type SimNode = SimulationNodeDatum & MapNode;
 type SimLink = SimulationLinkDatum<SimNode> & { id: string; label?: string };
@@ -86,14 +88,22 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
  * glyphs. Simulation nodes persist across renders so positions stay stable as
  * the agent discovers more; a user transform (translate + scale) rides on top
  * so you can zoom to the cursor, drag the canvas and click into any object.
+ * Layers hide the agent's activity or the surface; the shared filter dims
+ * everything that doesn't match, keeping matches connected to their hosts.
  */
 export function GlobalMap({
   state,
+  index,
+  filter,
+  onFilter,
   selected,
   onSelect,
   onOpen,
 }: {
   state: GraphState;
+  index: SurfaceIndex;
+  filter: SurfaceFilter;
+  onFilter: (f: SurfaceFilter) => void;
   selected?: string;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
@@ -104,6 +114,10 @@ export function GlobalMap({
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [panning, setPanning] = useState(false);
   const [legend, setLegend] = useState(false);
+  const [layers, setLayers] = useState({ surface: true, activity: true });
+  const [showFilter, setShowFilter] = useState(false);
+  /** The nodes currently drawn, for framing. */
+  const shown = useRef<SimNode[]>([]);
   const pan = useRef<{ x: number; y: number } | null>(null);
   /** Auto-frame the graph as it grows, until the user zooms or pans; the fit button re-engages it. */
   const follow = useRef(true);
@@ -111,7 +125,8 @@ export function GlobalMap({
 
   const { nodes, links } = useMemo(() => {
     const cache = nodesRef.current;
-    const nodes = Object.values(state.nodes).map((n) => {
+    const visible = (n: MapNode) => n.kind === "root" || (isSurface(n) ? layers.surface : layers.activity);
+    const nodes = Object.values(state.nodes).filter(visible).map((n) => {
       const prev = cache.get(n.id);
       const parent = n.parentId ? cache.get(n.parentId) : undefined;
       const seed = { x: (parent?.x ?? W / 2) + Math.random() * 20 - 10, y: (parent?.y ?? H / 2) + Math.random() * 20 - 10 };
@@ -119,14 +134,19 @@ export function GlobalMap({
       cache.set(n.id, sim);
       return sim;
     });
+    const ids = new Set(nodes.map((n) => n.id));
     const links: SimLink[] = Object.values(state.edges)
-      .filter((e) => cache.has(e.source) && cache.has(e.target))
+      .filter((e) => ids.has(e.source) && ids.has(e.target))
       .map((e) => ({ id: e.id, label: e.label, source: e.source, target: e.target }));
+    shown.current = nodes;
     return { nodes, links };
-  }, [state.nodes, state.edges]);
+  }, [state.nodes, state.edges, layers]);
+
+  const filtering = isFiltering(filter);
+  const match = useMemo(() => (filtering ? matchedIds(state, index, filter) : null), [state.nodes, state.triage, index, filter, filtering]);
 
   const fit = () => {
-    const ns = [...nodesRef.current.values()];
+    const ns = shown.current;
     if (!ns.length) return;
     const xs = ns.map((n) => n.x ?? 0);
     const ys = ns.map((n) => n.y ?? 0);
@@ -146,7 +166,7 @@ export function GlobalMap({
       // A gentle pull to the middle keeps big maps compact; stronger vertically for the wide panel.
       .force("x", forceX<SimNode>(W / 2).strength(0.03))
       .force("y", forceY<SimNode>(H / 2).strength(0.07))
-      .force("collide", forceCollide<SimNode>((d) => RADIUS[d.kind] + 14))
+      .force("collide", forceCollide<SimNode>((d) => (RADIUS[d.kind] ?? RADIUS.leaf) + 14))
       .alpha(0.5)
       .on("tick", () => {
         setTick((t) => t + 1);
@@ -178,7 +198,7 @@ export function GlobalMap({
     return () => svg.removeEventListener("wheel", onWheel);
   }, []);
 
-  if (!nodes.length) return <div className="empty">No surface mapped yet. Start an authorized testing session or run <code>npm run demo</code>.</div>;
+  if (!Object.keys(state.nodes).length) return <div className="empty">No surface mapped yet. Start an authorized testing session or run <code>npm run demo</code>.</div>;
 
   const promising = new Set(
     Object.values(state.assessments)
@@ -241,10 +261,11 @@ export function GlobalMap({
           {links.map((l) => {
             const s = l.source as SimNode;
             const t = l.target as SimNode;
+            const dim = match && !(match.withContext.has(s.id) && match.withContext.has(t.id));
             return (
-              <g key={l.id}>
+              <g key={l.id} className={dim ? "dim" : ""}>
                 <line className={`edge ${l.label ? "labelled" : ""}`} x1={s.x} y1={s.y} x2={t.x} y2={t.y} />
-                {l.label && view.k > 0.8 && (
+                {l.label && view.k > 0.8 && !dim && (
                   <text className="edge-label" x={((s.x ?? 0) + (t.x ?? 0)) / 2} y={((s.y ?? 0) + (t.y ?? 0)) / 2 - 3}>
                     {l.label}
                   </text>
@@ -253,12 +274,14 @@ export function GlobalMap({
             );
           })}
           {nodes.map((n) => {
-            const r = RADIUS[n.kind];
-            const showLabel = n.kind !== "leaf" || selected === n.id || view.k > LABEL_ZOOM || SURFACE.has(n.category ?? "") || n.outOfScope;
+            const r = RADIUS[n.kind] ?? RADIUS.leaf;
+            const hit = match?.direct.has(n.id) ?? false;
+            const dim = match ? !match.withContext.has(n.id) : false;
+            const showLabel = !dim && (n.kind !== "leaf" || selected === n.id || view.k > LABEL_ZOOM || SURFACE.has(n.category ?? "") || n.outOfScope || hit);
             return (
               <g
                 key={n.id}
-                className={`node ${n.kind} ${n.status} ${n.outOfScope ? "oob" : ""} ${promising.has(n.id) ? "promise" : ""} ${selected === n.id ? "selected" : ""}`}
+                className={`node ${n.kind} ${n.status} ${n.outOfScope ? "oob" : ""} ${promising.has(n.id) ? "promise" : ""} ${selected === n.id ? "selected" : ""} ${dim ? "dim" : ""} ${hit ? "hit" : ""}`}
                 transform={`translate(${n.x},${n.y})`}
                 onClick={() => onSelect(n.id)}
                 onDoubleClick={() => onOpen(n.id)}
@@ -274,6 +297,21 @@ export function GlobalMap({
           })}
         </g>
       </svg>
+
+      <div className={`map-filter ${showFilter || filtering ? "open" : ""}`}>
+        <div className="layer-row">
+          <button className={`toggle ${layers.surface ? "on" : ""}`} onClick={() => setLayers((l) => ({ ...l, surface: !l.surface }))} title="Hosts, endpoints and parameters">
+            Surface <span>{index.counts.hosts + index.counts.endpoints + index.counts.params}</span>
+          </button>
+          <button className={`toggle ${layers.activity ? "on" : ""}`} onClick={() => setLayers((l) => ({ ...l, activity: !l.activity }))} title="The agent's files, searches, commands and requests">
+            Activity <span>{index.counts.activity}</span>
+          </button>
+          <button className={`toggle ${showFilter || filtering ? "on" : ""}`} onClick={() => setShowFilter((v) => !v)} title="Filter the map">
+            Filter{match ? ` · ${match.direct.size}` : ""}
+          </button>
+        </div>
+        {(showFilter || filtering) && <FilterBar index={index} filter={filter} onChange={onFilter} />}
+      </div>
 
       <div className="map-controls">
         <button onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">+</button>

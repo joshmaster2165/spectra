@@ -1,16 +1,17 @@
 # Troubleshooting
 
-This page collects the failures you're most likely to hit, what each one looks like, and how to fix it: the hub not running or not reachable, hooks that don't fire, scope that flags everything or nothing, proxy imports that find nothing in scope, the Navigator exiting or staying quiet, and audit logs that fail verification. Most problems come down to three things — the hub isn't where a client expects it, a Claude Code session started before its hooks were installed, or the scope isn't what you think it is. Check those first.
+This page collects the failures you're most likely to hit, what each one looks like, and how to fix it: the hub not running or not reachable, hooks that don't fire, failed commands that stay active, scope that flags everything or nothing, proxy imports that find nothing in scope, the Navigator stopping or staying quiet, and audit logs that fail verification. Most problems come down to three things — the hub isn't where a client expects it, a Claude Code session started before its hooks were installed, or the scope isn't what you think it is. Check those first.
 
 ## Quick checks
 
 ```bash
 curl -s http://127.0.0.1:4317/state | head -c 200     # is the hub up?
+curl -s http://127.0.0.1:4317/health                  # what's connected?
 curl -s http://127.0.0.1:4317/sessions                # what has it recorded?
 npm run verify                                        # do the audit logs verify?
 ```
 
-On the dashboard, look at the top bar (**Live** or **Offline**, and the scope badge) and **Oversight → Scope** (who set the scope, and what it contains).
+On the dashboard, open **Settings** and read the **Setup** checklist: it shows, row by row, whether the scope is set, whether hook events and MCP annotations have arrived, whether the Navigator is running or stopped on an error, and whether the audit log is on. Then look at the top bar (**Live** or **Offline**, and the scope badge) and **Oversight → Scope** (who set the scope, and what it contains).
 
 ## The hub
 
@@ -39,7 +40,8 @@ Each client fails differently:
 |---|---|
 | Hook | Nothing. It gives up silently after 300 ms so Claude Code is never affected; the session simply doesn't appear. |
 | MCP server | The tools still report success to the agent. The server's stderr says `[spectra-mcp] hub unreachable: …`. |
-| Navigator | `[navigator] socket error: …` and `[navigator] hub connection closed; retrying in 3s`, repeating until the hub is up. |
+| `npm run validator` | `[navigator] socket error: …` and `[navigator] hub connection closed; retrying in 3s`, repeating until the hub is up. |
+| Settings dialog | *Can't reach the hub. Is `npm start` still running?* |
 | Importer | `Can't reach the hub at http://127.0.0.1:4317. Start it with npm start.` |
 | Demos | The script stops with a fetch error. |
 
@@ -49,7 +51,7 @@ Fixes: start the hub; make sure `SPECTRA_HUB` and `SPECTRA_PORT` agree; and use 
 
 ### Hooks aren't firing
 
-Symptoms: the agent works but nothing appears, or activity appears without your prompts (prompts come only from hooks — if you see tool calls but no *operator prompt* entries, the activity is coming from the log observer instead).
+Symptoms: the agent works but nothing appears, or activity appears without your prompts (prompts come only from hooks — if you see tool calls but no *operator prompt* entries, the activity is coming from the log observer instead). In **Settings → Setup**, the **Claude Code hooks** row stays at *No hook events yet*.
 
 1. **Restart the session.** Hooks load when a Claude Code session starts. Sessions already running when you installed them won't report.
 2. **Check where they're installed.** Project hooks go in `<project>/.claude/settings.local.json` and only apply to sessions started in that project. Open the file and look for `spectra-hook.mjs` under `hooks`. Use `--user` to cover every project.
@@ -65,6 +67,18 @@ Symptoms: the agent works but nothing appears, or activity appears without your 
    The **Session** field should show `hook-test` and a root named `target-repo` should appear on the map. If it does, the hook and hub are fine and the problem is Claude Code's configuration.
 
 If the settings file can't be parsed, the installer refuses to touch it: `could not parse <path>: …`. Fix the JSON and run it again.
+
+### A failed command stays active
+
+Symptom: a command or request that failed keeps its orange **active** colour and never settles, and the **Target** view shows *…* for that call instead of *ERR*.
+
+Claude Code reports a failed tool call only through the `PostToolUseFailure` hook event. Hooks installed before Spectra registered that event never deliver the failure, so the call never gets a result. Run the installer again, then restart Claude Code:
+
+```bash
+npm run hooks:install -- /path/to/target-repo     # or: -- --user
+```
+
+Re-running is safe: it replaces Spectra's entries rather than adding more. To confirm, open the settings file the installer names and check that `PostToolUseFailure` is listed under `hooks`. After the restart, a failed call shows *ERR* and its target goes back to **unmapped**. Targets that were already stuck stay active until the agent touches them again or the hub restarts.
 
 ### The observer shows sessions you didn't expect
 
@@ -91,11 +105,13 @@ With the default session id, the hub attaches MCP annotations to the live Claude
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Badge says *unset*; nothing is flagged | Nothing configured (no paths or hosts), and no session has started. | Configure paths or hosts, `POST /scope`, or start a session. |
-| Every file access is flagged | The scope's paths don't match where the agent works — a typo, a different checkout, or a relative path. | Check **Oversight → Scope** for the exact paths, and post the right ones with `POST /scope`. |
-| Every host is flagged | No hosts are configured, so only loopback is in scope. | Add `hosts` to the config, or `SPECTRA_SCOPE_HOSTS`, or `POST /scope`. |
+| Badge says *unset*; nothing is flagged | Nothing configured (no paths or hosts), and no session has started. | Configure paths or hosts, set them in **Settings → Scope**, `POST /scope`, or start a session. |
+| Every file access is flagged | The scope's paths don't match where the agent works — a typo, a different checkout, a relative path, or a scope saved from Settings with **Paths** empty. | Check **Oversight → Scope** for the exact paths, and set the right ones in **Settings → Scope** or with `POST /scope`. |
+| Every host is flagged | No hosts are configured, so only loopback is in scope. | Add `hosts` to the config, or `SPECTRA_SCOPE_HOSTS`, or set them in **Settings → Scope** or with `POST /scope`. |
 | Your config seems ignored | The file isn't valid JSON, isn't where the hub looks, or has relative paths. | The startup line `[spectra] scope: …` shows the loaded paths. Fix the JSON, set `SPECTRA_CONFIG`, use absolute paths. Restart the hub. |
-| The scope changed by itself | A demo ran. Each demo posts its own scope. | Restart the hub or post your scope again. |
+| The scope changed by itself | A demo ran. Each demo posts its own scope. | Set your scope again in **Settings**, or start a new engagement, which goes back to the config file's scope. |
+| The scope you set in Settings is gone | `spectra.config.json` sets paths, which win at startup; or you started a new engagement; or the audit log is off. | Put the scope in `spectra.config.json`. |
+| Sessions stopped adding their working directory | You saved a scope from Settings, or posted `paths`. The scope then counts as set by you. | Add the directory to **Paths**. |
 | A subdomain isn't flagged | Hosts include their subdomains. | Expected. List exactly the hosts you're authorized for. |
 | A local service isn't flagged | Loopback is always in scope. | Expected. |
 | A shell command touched something but wasn't flagged | The path or host was built at runtime, is relative, or is under an ignored system prefix. | See [Security → Limits](security.md#limits). |
@@ -112,21 +128,43 @@ The dashboard shows *Nothing in scope to import*; the CLI prints the hint *Nothi
 |---|---|
 | *Not a HAR file: expected log.entries* | Export as HAR, not the proxy's own format. |
 | Most requests skipped as static | Add `--include-static` (CLI only). |
-| Request counts doubled | You imported the same file twice. Restart the hub for a clean map. |
-| An endpoint lost its *seen in* / requests / methods | The agent requested it after the import, which replaced its properties. Import again. |
+| Request counts doubled | You imported the same file twice. Start a new engagement in **Settings** for a clean map, and import once. |
+| An endpoint shows *agent and proxy traffic* | Both the agent and your imported history touched it. The imported request count and methods are kept when the agent requests it later. |
 
 See [Proxy import → Troubleshooting](proxy-import.md#troubleshooting) for every message.
 
 ## Navigator
 
+### Settings shows Stopped
+
+The Navigator in the hub hit an error it can't recover from, and it stays stopped until its settings change. The reason is shown under the checkbox in **Settings** and in the **Navigator** row of the Setup checklist:
+
+| Reason shown | Fix |
+|---|---|
+| *The API key was rejected.* | Save a valid key: paste it into **API key** and click **Save key**. |
+| *This key isn't allowed to use that model.* | Change **Model** to one the key can use, or save a different key. |
+| *That model wasn't found.* | Correct the model id in **Model**. |
+
+Saving a new key or model restarts the Navigator, and the pill goes back to **Running**. Click **Test connection** first to check the key and model without waiting for an assessment. If the reason was a key from the hub's environment, save a working key in Settings (it takes the environment key's place), or restart the hub with a valid `ANTHROPIC_API_KEY`.
+
+### Other Navigator problems
+
+The `[navigator]` lines below appear in the hub's terminal when the Navigator runs in the hub, and in its own terminal under `npm run validator`.
+
 | Symptom | Cause and fix |
 |---|---|
-| `` [navigator] auth failed — set ANTHROPIC_API_KEY (or run `ant auth login`). Exiting. `` and exit code 1 | The API rejected the credentials. Export a valid `ANTHROPIC_API_KEY` in the same shell and start it again. |
-| `[navigator] model call failed: …` | Any other API error — often an unknown model id in `SPECTRA_VALIDATOR_MODEL`, a network problem or rate limiting. The Navigator keeps running and tries again on the next change. |
+| The **Run the Navigator in the hub** box is greyed out | No key is available. Save one in **API key**, or start the hub with `ANTHROPIC_API_KEY` set. |
+| The pill says **Off**, and the box is ticked but greyed out | The Navigator was turned on with a key from the hub's environment, and the hub was restarted without it. Save a key in Settings, or restart the hub with `ANTHROPIC_API_KEY` set. |
+| **Test connection** fails | The message says why: a rejected key, a model the key can't use, an unknown model, rate limiting, or *Couldn't reach the Anthropic API* (check your network). It tests the *saved* key and model, so save a new key before testing it. |
+| `npm run validator` prints `` [navigator] The API key was rejected. Set ANTHROPIC_API_KEY (or run `ant auth login`). Exiting. `` and exits with code 1 | The API rejected the credentials, or there were none (*No API key is set.*). Export a valid `ANTHROPIC_API_KEY` in the same shell and start it again. It also exits with *That model wasn't found. Check SPECTRA_VALIDATOR_MODEL.* or *This key isn't allowed to use that model.* — fix the model id. |
+| `[navigator] model call failed: …` | The reason follows. For a rejected key, a forbidden model or an unknown model, see the rows above. Anything else — rate limiting, a network problem, another API error — doesn't stop it: it keeps running and tries again after the next change. In Settings it appears as *Last error: …*. |
 | `[navigator] model declined to assess this state; skipping cycle.` | The model refused that assessment. It tries again after the next change. |
-| No leads appear | The map is empty, or it hasn't been quiet long enough: it waits for 2.5 s without events (`SPECTRA_VALIDATOR_IDLE_MS`) and runs at most every 15 s. Check its terminal for `posted N assessment(s)`. |
+| No leads appear | The map is empty, or it hasn't been quiet long enough: it waits for 2.5 s without events (`SPECTRA_VALIDATOR_IDLE_MS`) and runs at most every 15 s. Check Settings for *N assessments · last …*, or the terminal for `posted N assessment(s)`. |
+| Leads keep being rewritten, and both terminals log `posted N assessment(s)` | The Navigator is on in Settings **and** `npm run validator` is running, so every change is assessed twice. Stop one of them. |
+| Leads change when you mark triage or edit the scope | Expected: any change to the map, including triage marks and scope changes, makes the Navigator reassess. |
 | Some targets never get a lead | The digest holds 200 targets, attack surface first; on a bigger map the oldest files and commands drop out first, then the oldest surface. Out-of-scope targets never get leads. |
 | Stale leads | Leads persist until the Navigator assesses that target again; stopping the Navigator leaves them in place. |
+| The key is gone after a restart | The hub was started with a different `SPECTRA_SETTINGS`, or as a different user. The key lives in that one file. |
 
 ## Audit log fails verification
 
@@ -139,7 +177,7 @@ The footer shows *Audit log FAILED at line N: reason*, or `npm run verify` print
 | *sequence number is …* / *previous-hash link is broken …* | Lines were removed, inserted or reordered. The same applies. |
 | *line has no hash …* | A log from before hash chaining, or a hand-added line. |
 | *recorded head … is not in the log (log was rewritten)* | The log was rewritten since you recorded that head, even though its chain is consistent. |
-| *log file not found* / footer *Audit log: log file not found* | No log for that session id. MCP annotations are under `mcp`. |
+| *log file not found* / footer *Audit log: log file not found* | No log for that session id. MCP annotations are in the live session's log, or under `mcp` if they arrived before any session started. |
 | `no audit logs in <dir>` | `npm run verify` is looking in a different directory from the hub. Set `SPECTRA_DATA_DIR` the same for both. |
 | Footer *Audit log: audit log disabled* | The hub runs with `SPECTRA_PERSIST=0`. |
 
@@ -151,10 +189,18 @@ A failure means the file no longer matches what was written; it doesn't say who 
 |---|---|
 | **Replay** shows no sessions | The audit log is off (`SPECTRA_PERSIST=0`), or nothing has been recorded yet. |
 | The graph stopped following new targets | You zoomed or panned. Click **⤢** to fit and follow again. |
+| Most of the graph is faded and can't be clicked | A filter is set, possibly from the Surface view — the two share one filter. Click **Clear** in the filter bar at the top left of the graph. |
+| The graph shows only session roots, or the attack surface is missing | A layer is switched off. Click **Surface** or **Activity** at the top left of the graph. |
+| Surface says *Nothing matches these filters* | The same filter. Click **Clear** in the filter bar. Tag chips combine: a target must carry every selected tag. |
+| A target has no tags, or a tag looks wrong | Tags come from the hostname and route alone. They're a sorting aid, not a finding. See [Dashboard → Tags](dashboard.md#tags). |
+| The map and triage marks are gone after a restart | The hub restores the engagement from the audit log, so this means the log is off (`SPECTRA_PERSIST=0`), the hub was started with `SPECTRA_RESUME=0`, or it's using a different `SPECTRA_DATA_DIR`. Look for `[spectra] restored the engagement: …` in the startup output. The marks are still in the session's log — open it in **Replay**. |
+| Triage controls are greyed out | You're replaying a recorded session, where marks are read-only. Go **Back to live**. |
+| A triage menu snaps back, or Target says *Couldn't reach the hub* | The hub is down, or the target isn't on the live map any more (for example after a new engagement). |
+| **Export CSV** is greyed out | No rows match the filter. |
 | **Files** says *No scope paths set* | The scope has no paths. |
 | A file the agent clearly read shows *never opened* | It was read through a shell command (`cat`, `sed`, …). Only structured tools count toward file coverage. |
 | No desktop alerts | `SPECTRA_NOTIFY=0`; on Linux, `notify-send` isn't installed; or your system's notification settings block them. Alerts are also collapsed to one every 5 seconds. |
-| The map is cluttered with old sessions | The hub keeps everything since it started. Restart it for a clean map; recorded sessions stay available in Replay. |
+| The map is cluttered with old sessions, or still shows a demo | The hub keeps the engagement across restarts. Click **Settings → New engagement** for a clean map; recorded sessions stay available in Replay. |
 
 ---
 

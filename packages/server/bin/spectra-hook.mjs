@@ -6,7 +6,7 @@
  *   - gives up on the hub after 300 ms so the agent is never slowed down
  *
  * Registered for SessionStart, UserPromptSubmit, PreToolUse, PostToolUse,
- * SessionEnd by bin/install-hooks.mjs.
+ * PostToolUseFailure and SessionEnd by bin/install-hooks.mjs.
  */
 
 const HUB = process.env.SPECTRA_HUB ?? "http://127.0.0.1:4317";

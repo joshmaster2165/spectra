@@ -43,7 +43,7 @@ Leave this terminal running. The hook, the MCP server, the Navigator, the import
 
 Open a second terminal in the same directory and run one of the two demos. Both are scripts: they post events to the hub the way a real session would, labelled with the source `demo`, so you can explore the dashboard without an agent.
 
-> Each demo sets the scope to its own target (`/work/acme-shop…` and `acme-shop.test`), replacing whatever scope you had until you restart the hub or set a new one. The hub keeps its map in memory, so restarting `npm start` also clears the map. The demo sessions stay in the audit log and can still be [replayed](dashboard.md#replay).
+> Each demo sets the scope to its own target (`/work/acme-shop…` and `acme-shop.test`), replacing whatever scope you had until you set a new one. The hub keeps its map across restarts, so when you're done with a demo, clear it with **Settings → New engagement**. The demo sessions stay in the audit log and can still be [replayed](dashboard.md#replay).
 
 ### The short demo: `npm run demo`
 
@@ -82,7 +82,7 @@ Set `SPECTRA_DEMO_PACE` below 1 to run it faster, for example `SPECTRA_DEMO_PACE
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | The current session, the scope badge (red when anything went out of scope), Import HAR, Report, Replay, and whether the dashboard is live. |
+| **Top bar** | The current session, the scope badge (red when anything went out of scope), Import HAR, Report, Settings, Replay, and whether the dashboard is live. |
 | **Attack Surface** (left) | The map, in five views: Graph, Tree, Surface, Files and Target. |
 | **Activity** (top right) | The agent's reasoning and tool calls as they happen, and a list of every target. |
 | **Oversight** (middle right) | Findings with their evidence, the Navigator's leads, and the scope with its violations. |

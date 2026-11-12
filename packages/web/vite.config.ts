@@ -16,6 +16,12 @@ export default defineConfig({
       "/review": HUB,
       "/verify": HUB,
       "/import": HUB,
+      "/settings": HUB,
+      "/health": HUB,
+      "/triage": HUB,
+      "/engagement": HUB,
+      "/navigator": HUB,
+      "/scope": HUB,
     },
   },
 });

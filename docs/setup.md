@@ -1,6 +1,6 @@
 # Setup
 
-This is the full setup guide, in the order you'll do it: define the scope you're authorized for, connect Claude Code so every tool call reaches the hub, optionally register the MCP server so the agent can annotate the map, optionally start the Navigator, and import proxy history. It ends with a checklist to confirm everything works and the steps to remove Spectra again. It assumes you've installed Spectra and can run `npm start` — see [Getting started](getting-started.md) if not.
+This is the full setup guide, in the order you'll do it: define the scope you're authorized for, connect Claude Code so every tool call reaches the hub, optionally register the MCP server so the agent can annotate the map, optionally turn on the Navigator, and import proxy history. It ends with a checklist to confirm everything works and the steps to remove Spectra again. The dashboard's **Settings** dialog covers three of these without a restart or a second terminal: the scope, the Navigator, and a live checklist of what's connected. It assumes you've installed Spectra and can run `npm start` — see [Getting started](getting-started.md) if not.
 
 Throughout, `/path/to/target-repo` is the code you're testing and `example-shop.test` is the target host. Replace both with your own.
 
@@ -37,16 +37,19 @@ SPECTRA_SCOPE_PATHS=/path/to/target-repo SPECTRA_SCOPE_HOSTS=example-shop.test,e
 
 ### Changing it live
 
-Post a new scope to the running hub:
+**From the dashboard:** click **Settings** in the top bar and edit **Scope** — paths and hosts, one per line — then **Save scope**. A pasted URL is reduced to its hostname. See [Dashboard → Scope editor](dashboard.md#scope-editor).
+
+**From a terminal:** post a new scope to the running hub:
 
 ```bash
 curl -X POST http://127.0.0.1:4317/scope -H 'content-type: application/json' \
   -d '{"paths":["/path/to/target-repo"],"hosts":["example-shop.test"]}'
 ```
 
-- This **replaces** the whole scope. Send both lists every time: if you leave out `paths`, no directory is in scope and every file access is flagged.
+- Each list you send **replaces** the current one. A list you leave out keeps its current value; the Settings editor leaves the paths out unless you edit them. An empty `paths` list means no directory is in scope, and every file access is flagged.
+- Once you've set paths this way, the scope counts as set by you, and new sessions stop adding their working directories.
 - The change is recorded in the audit log of every open session.
-- It lasts until the hub restarts; then the config file applies again.
+- It's kept with the engagement, so it survives a hub restart — unless the config file sets paths, which apply again at startup.
 
 ### How scope is matched
 
@@ -89,9 +92,11 @@ npm run hooks:install -- --user
 | A project directory | `/path/to/target-repo/.claude/settings.local.json` |
 | `--user` | `~/.claude/settings.json` |
 
-The installer merges Spectra's hook into the `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and `SessionEnd` events (matcher `*` for the tool events), with a 2-second timeout. It keeps your existing settings and other hooks, and re-running it is safe: it replaces its own entry rather than adding another. Pass the project directory as an absolute path.
+The installer merges Spectra's hook into six events — `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `SessionEnd` (matcher `*` for the three tool events) — with a 2-second timeout. It keeps your existing settings and other hooks, and re-running it is safe: it replaces its own entry rather than adding another. Pass the project directory as an absolute path.
 
 **Restart any running Claude Code sessions** in that project (or all of them, for `--user`). Hooks load when a session starts.
+
+> **Installed the hooks before `PostToolUseFailure` was added?** Run the installer again, then restart Claude Code. Claude Code reports a failed tool call only through `PostToolUseFailure`; without it a failed command never gets a result, and its target stays **active** on the map. (Checked against Claude Code 2.1.303.)
 
 To remove them, run the same command with `--remove`:
 
@@ -156,16 +161,30 @@ Adding a line like this to the target project's `CLAUDE.md` helps the agent use 
 
 > Record discovered hosts, subdomains, endpoints and parameters with `map_target`, and report suspected vulnerabilities with `report_finding`, linking the attack-chain steps that support them.
 
-## 4. Start the Navigator (optional)
+## 4. Turn on the Navigator (optional)
 
 The Navigator is a second model that reads the same map and scores where to dig. It needs an Anthropic API key and is the only part of Spectra that sends data off your machine.
+
+**From Settings (recommended).** The hub runs the Navigator itself:
+
+1. Click **Settings** in the dashboard's top bar.
+2. Under **Navigator**, paste your API key and click **Save key**. The hub stores it in `~/.spectra/settings.json`, readable only by you, and never sends it back to the browser — the field shows only its last four characters.
+3. Leave the model as `claude-opus-5-5`, or enter another model id.
+4. Click **Test connection**. It sends one tiny request and reports whether the key and model work.
+5. Tick **Run the Navigator in the hub**. The pill next to the heading turns to **Running**.
+
+It then posts leads and verdicts whenever the map has been quiet for a moment, and starts again with the hub until you untick the box. While it's on, the hub process itself calls the Anthropic API.
+
+**As a separate process.** The same Navigator also runs on its own, in a second terminal:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 npm run validator
 ```
 
-It prints `[navigator] watching ws://127.0.0.1:4317/ws with claude-opus-5-5` and then posts leads and verdicts whenever the map has been quiet for a moment. `SPECTRA_VALIDATOR_MODEL` picks the model. [Navigator](navigator.md) explains what it sends, what comes back and how to read it.
+It prints `[navigator] watching ws://127.0.0.1:4317/ws with claude-opus-5-5` and posts through the hub's `/validator` route. `SPECTRA_VALIDATOR_MODEL` picks the model.
+
+Use one or the other, not both at once: each would assess every change, and you'd get duplicate advice. [Navigator](navigator.md) explains what it sends, what comes back and how to read it.
 
 ## 5. Import proxy history (optional)
 
@@ -179,14 +198,16 @@ Only in-scope hosts are imported, and only parameter names, never values. See [P
 
 ## 6. Check that it works
 
-With the hub running and your scope set:
+The quickest check is **Settings → Setup** in the dashboard: one row each for the hub, scope, Claude Code hooks, agent annotations (MCP), the Navigator, proxy history and the audit log, each marked ok, to-do, optional or warning, and refreshed every few seconds. Hooks, MCP and proxy history turn ok when their first event reaches the hub. See [Dashboard → Setup checklist](dashboard.md#setup-checklist).
+
+To walk through it by hand, with the hub running and your scope set:
 
 1. **Dashboard connected.** The top bar shows **Live**.
 2. **Scope loaded.** The scope badge shows your path and host counts; **Oversight → Scope** says *Set by: Operator config* (or *Session working directory* if you're relying on session scope).
-3. **A session arrives.** Start Claude Code in the target (`cd /path/to/target-repo && claude`) and ask it to read a file. A session root and a `files` node appear on the graph, the **Session** field shows the session id, and **Activity → Stream** shows your prompt (tagged *operator prompt*) and the `Read` call.
+3. **A session arrives.** Start Claude Code in the target (`cd /path/to/target-repo && claude`) and ask it to read a file. A session root and a `files` node appear on the graph, the **Session** field shows the session id, and **Activity → Stream** shows your prompt (tagged *operator prompt*) and the `Read` call. The checklist's **Claude Code hooks** row turns ok.
 4. **Violations are flagged.** Ask the agent to read a harmless file outside your scope paths. The node turns red, the badge shows *1 out of scope*, **Oversight → Scope** lists the violation (*med* for a read with the `Read` tool, *high* if the agent used the shell), and a desktop alert appears.
 5. **MCP tools work** (if registered). Ask the agent to call `log_thought`; the note appears in the stream.
-6. **The Navigator answers** (if running). Its terminal shows `[navigator] posted N assessment(s) for session …` and **Oversight → Navigator** fills with leads.
+6. **The Navigator answers** (if it's on). **Oversight → Navigator** fills with leads, and Settings shows *N assessments · last …*. The line `[navigator] posted N assessment(s) for session …` appears in the hub's terminal when it runs in the hub, or in its own terminal under `npm run validator`.
 7. **The audit log verifies.** The footer reads *Audit log verified · N events · head …*. From a terminal:
 
    ```bash
@@ -207,8 +228,9 @@ If any step fails, see [Troubleshooting](troubleshooting.md).
 
 2. Remove the MCP server: `claude mcp remove spectra`.
 3. Stop `npm start` and `npm run validator`.
-4. Delete the audit logs if you don't need them as evidence: `rm -rf ~/.spectra/sessions` (or your `SPECTRA_DATA_DIR`). This can't be undone.
-5. Delete the Spectra checkout, including your `spectra.config.json`.
+4. Delete the saved Navigator key and settings: `rm ~/.spectra/settings.json` (or your `SPECTRA_SETTINGS` file).
+5. Delete the audit logs if you don't need them as evidence: `rm -rf ~/.spectra/sessions` (or your `SPECTRA_DATA_DIR`). This can't be undone.
+6. Delete the Spectra checkout, including your `spectra.config.json`.
 
 ---
 

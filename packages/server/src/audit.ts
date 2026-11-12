@@ -49,6 +49,18 @@ export class AuditLog {
     return [...this.writers.keys()];
   }
 
+  /** How many events a session's log holds so far. */
+  length(sessionId: string): number {
+    const w = this.writers.get(sessionId);
+    if (w) return w.seq;
+    const tail = lastLine(this.file(sessionId));
+    try {
+      return tail ? (JSON.parse(tail)._seq ?? 0) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   append(sessionId: string, event: SpectraEvent) {
     const w = this.writer(sessionId);
     const json = JSON.stringify(event);
@@ -61,15 +73,29 @@ export class AuditLog {
   }
 
   read(sessionId: string): SpectraEvent[] {
+    let text: string;
     try {
-      return fs
-        .readFileSync(this.file(sessionId), "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => stripChain(JSON.parse(l)));
+      text = fs.readFileSync(this.file(sessionId), "utf8");
     } catch {
       return [];
     }
+    const events: SpectraEvent[] = [];
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      try {
+        events.push(stripChain(JSON.parse(line)));
+      } catch {
+        // A line cut short by a crash: keep everything readable around it.
+      }
+    }
+    return events;
+  }
+
+  /** Flush and close every log, so nothing buffered is lost when the hub stops. */
+  close(): Promise<void> {
+    const writers = [...this.writers.values()];
+    this.writers.clear();
+    return Promise.all(writers.map((w) => new Promise<void>((resolve) => w.stream.end(resolve)))).then(() => undefined);
   }
 
   list(): SessionInfo[] {

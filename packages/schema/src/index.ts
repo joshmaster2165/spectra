@@ -193,6 +193,57 @@ export interface FindingAssessment {
   ts: number;
 }
 
+/* ── Triage (the operator's recon worklist) ────────────── */
+
+/** Where a target stands in the operator's own testing plan. */
+export type TriageState = "queued" | "testing" | "tested" | "skipped";
+
+export const TRIAGE_LABEL: Record<TriageState, string> = { queued: "To test", testing: "Testing", tested: "Tested", skipped: "Skip" };
+
+/** The operator's mark on a target; the agent and the Navigator can't set it. */
+export interface Triage {
+  state: TriageState;
+  note?: string;
+  ts: number;
+}
+
+/* ── Surface tags ──────────────────────────────────────── */
+
+export const SURFACE_TAGS = ["api", "graphql", "auth", "admin", "internal", "exposed", "docs", "files", "payments", "webhook", "object-id"] as const;
+export type SurfaceTag = (typeof SURFACE_TAGS)[number];
+
+const TAG_RULES: { tag: SurfaceTag; host?: RegExp; route?: RegExp }[] = [
+  { tag: "api", host: /^(api|rest|gateway)\./, route: /(^|\/)(api|rest|v\d+)(\/|$)/ },
+  { tag: "graphql", route: /graphi?ql/ },
+  {
+    tag: "auth",
+    host: /^(auth|sso|login|id|accounts?|identity|oauth)\./,
+    route: /(^|[/._-])(login|logout|signin|signup|register|oauth|authorize|token|sso|saml|password|reset|session|mfa|2fa|otp|userinfo|openid-configuration|jwks)($|[/._-])/,
+  },
+  { tag: "admin", host: /^(admin|manage|console|backoffice|staff)\./, route: /(^|\/)(admin|manage|management|console|backoffice|dashboard|staff)(\/|$)/ },
+  {
+    tag: "internal",
+    host: /^(staging|stage|dev|test|qa|internal|debug|uat|sandbox)\./,
+    route: /(^|\/)(internal|debug|actuator|metrics|health|healthz|server-status|trace|seed|phpinfo)(\/|$)/,
+  },
+  { tag: "exposed", route: /(^|\/)\.(git|svn|hg|env|htpasswd|ds_store)(\/|$)|(^|\/)(backup|backups|dump)(\/|$)|\.(sql|bak|old|zip|tar|gz)$/ },
+  { tag: "docs", host: /^(docs|developers?|swagger)\./, route: /swagger|openapi|api-docs|redoc|playground/ },
+  { tag: "files", route: /(^|\/)(uploads?|import|export|downloads?|files?|attachments?|avatar|media|documents?)(\/|$)/ },
+  { tag: "payments", host: /^(pay|payments?|billing|checkout)\./, route: /payment|checkout|billing|invoice|refund|coupon|cart|order|intent|subscription|wallet/ },
+  { tag: "webhook", route: /webhook|callback/ },
+  { tag: "object-id", route: /:(id|token)(\/|$)/ },
+];
+
+/**
+ * What kind of surface a route on a host looks like, from its name alone.
+ * Heuristic labels for sorting and filtering recon — not findings.
+ */
+export function surfaceTags(route: string, host = ""): SurfaceTag[] {
+  const r = route.toLowerCase();
+  const h = host.toLowerCase();
+  return TAG_RULES.filter((t) => (t.host && h && t.host.test(h)) || (t.route && r && t.route.test(r))).map((t) => t.tag);
+}
+
 /* ── Proxy import ──────────────────────────────────────── */
 
 /**
@@ -330,13 +381,14 @@ export type SpectraEvent =
   | (Base & { type: "finding.upsert"; finding: Finding })
   | (Base & { type: "finding.review"; findingId: string; review: Review })
   | (Base & { type: "finding.edit"; findingId: string; edit: FixEdit })
+  | (Base & { type: "target.triage"; nodeId: string; triage: Triage | null })
   | (Base & { type: "assessment.upsert"; assessment: Assessment })
   | (Base & { type: "finding.assessment"; findingId: string; assessment: FindingAssessment });
 
 export type SpectraEventType = SpectraEvent["type"];
 
 /** Event types only the hub itself may produce; rejected from POST /events. */
-export const HUB_ONLY_EVENTS: SpectraEventType[] = ["scope.set", "scope.violation", "finding.review", "finding.edit"];
+export const HUB_ONLY_EVENTS: SpectraEventType[] = ["scope.set", "scope.violation", "finding.review", "finding.edit", "target.triage"];
 
 /** Only the Navigator (via the hub's /validator endpoint) may produce these; rejected from POST /events. */
 export const VALIDATOR_ONLY_EVENTS: SpectraEventType[] = ["assessment.upsert", "finding.assessment"];
@@ -349,6 +401,8 @@ export interface GraphState {
   findings: Record<string, Finding>;
   /** The Navigator's leads, keyed by assessment id. */
   assessments: Record<string, Assessment>;
+  /** The operator's triage marks, keyed by node id. */
+  triage: Record<string, Triage>;
   scope?: Scope;
   violations: ScopeViolation[];
   /** Absolute path → how the agent touched it */
@@ -375,7 +429,7 @@ export const TIMELINE_LIMIT = 500;
 export const SEVERITY_RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
 export function emptyState(): GraphState {
-  return { nodes: {}, edges: {}, chain: {}, findings: {}, assessments: {}, violations: [], files: {}, counts: { toolCalls: 0, failed: 0 }, timeline: [] };
+  return { nodes: {}, edges: {}, chain: {}, findings: {}, assessments: {}, triage: {}, violations: [], files: {}, counts: { toolCalls: 0, failed: 0 }, timeline: [] };
 }
 
 /** Pure reducer shared by the hub, the live dashboard and replay. */
@@ -448,6 +502,13 @@ export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
     case "finding.edit": {
       const f = state.findings[e.findingId];
       if (f) next.findings = { ...state.findings, [f.id]: { ...f, edits: [...(f.edits ?? []), e.edit] } };
+      break;
+    }
+    case "target.triage": {
+      const triage = { ...state.triage };
+      if (e.triage) triage[e.nodeId] = e.triage;
+      else delete triage[e.nodeId];
+      next.triage = triage;
       break;
     }
     case "assessment.upsert":
