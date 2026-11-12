@@ -11,6 +11,13 @@ interface NavigatorView {
   status: { state: "off" | "idle" | "assessing" | "error"; model: string; runs: number; lastRun?: number; lastPosted?: number; lastError?: string };
 }
 
+interface InterpreterView {
+  mode: "off" | "unread" | "all";
+  status: { state: "off" | "idle" | "reading" | "error"; model: string; read: number; queued: number; lastRun?: number; lastError?: string };
+  /** Unread actions whose output the hub still holds. */
+  waiting: number;
+}
+
 interface Health {
   hub: { startedAt: number; events: number };
   scope: { set: boolean; origin?: string; paths?: number; hosts?: number };
@@ -20,6 +27,8 @@ interface Health {
   proxy: { lastImport: number | null };
   navigator: NavigatorView & { externalLastSeen: number | null };
   audit: { enabled: boolean; dir: string | null };
+  interpreter: InterpreterView;
+  actions: { total: number; unread: number; open: number };
   engagement: { started: number; sessions: number; restored: { events: number; sessions: number } | null } | null;
 }
 
@@ -42,6 +51,7 @@ function ago(ts: number | null | undefined) {
  */
 export function SettingsPanel({ state, onClose }: { state: GraphState; onClose: () => void }) {
   const [nav, setNav] = useState<NavigatorView>();
+  const [interp, setInterp] = useState<InterpreterView>();
   const [health, setHealth] = useState<Health>();
   const [offline, setOffline] = useState(false);
 
@@ -49,6 +59,7 @@ export function SettingsPanel({ state, onClose }: { state: GraphState; onClose: 
     try {
       const [s, h] = await Promise.all([fetch("/settings").then((r) => r.json()), fetch("/health").then((r) => r.json())]);
       setNav(s.navigator);
+      setInterp(s.interpreter);
       setHealth(h);
       setOffline(false);
     } catch {
@@ -78,6 +89,7 @@ export function SettingsPanel({ state, onClose }: { state: GraphState; onClose: 
         <div className="modal-body">
           {offline && <p className="alert-text">Can't reach the hub. Is `npm start` still running?</p>}
           {nav && <NavigatorSettings nav={nav} onSaved={setNav} />}
+          {nav && interp && <InterpreterSettings nav={nav} interp={interp} onSaved={setInterp} />}
           <ScopeSettings state={state} onSaved={refresh} />
           {health && <EngagementSettings health={health} targets={Object.keys(state.nodes).length} onReset={refresh} />}
           {health && <SetupChecklist health={health} />}
@@ -175,6 +187,51 @@ function NavigatorSettings({ nav, onSaved }: { nav: NavigatorView; onSaved: (n: 
         {s.runs > 0 && `${s.runs} assessment${s.runs === 1 ? "" : "s"} · last ${ago(s.lastRun)} posted ${s.lastPosted} lead${s.lastPosted === 1 ? "" : "s"} and verdicts. `}
         {s.state !== "error" && s.lastError && `Last error: ${s.lastError} `}
         {nav.enabled && s.runs === 0 && s.state !== "error" && "Waiting for the map to change, then for a quiet moment."}
+      </p>
+    </section>
+  );
+}
+
+/**
+ * The second seat's other job: reading the actions the hub couldn't. It is the
+ * one setting that sends command output off the machine, so it says so.
+ */
+function InterpreterSettings({ nav, interp, onSaved }: { nav: NavigatorView; interp: InterpreterView; onSaved: (i: InterpreterView) => void }) {
+  const s = interp.status;
+  const setMode = async (mode: string) => {
+    const res = await post("/settings", { interpreter: { mode } }).catch(() => undefined);
+    if (res?.ok) onSaved((await res.json()).interpreter);
+  };
+  // A mode can be saved with no key to run it (the key was removed): say so rather than "Running".
+  const idle = interp.mode !== "off" && s.state === "off";
+  const pill = interp.mode === "off" || idle ? "off" : s.state === "error" ? "error" : s.state === "reading" ? "assessing" : "idle";
+  return (
+    <section className="settings-section">
+      <h3>
+        Interpreter <span className={`state-pill ${pill}`}>{interp.mode === "off" ? "Off" : idle ? "No key" : s.state === "error" ? "Stopped" : s.state === "reading" ? "Reading…" : "Running"}</span>
+      </h3>
+      <p className="hint">
+        Spectra records every action, but it can only read the ones whose targets are written in the command. The Interpreter has the same model read the rest — scripts, scanners, commands built from
+        variables — and adds what their output shows to the map, marked as found in output.
+      </p>
+      <label className="field-row">
+        <span>Read</span>
+        <select value={interp.mode} disabled={!nav.hasKey} onChange={(e) => void setMode(e.target.value)}>
+          <option value="off">Nothing (off)</option>
+          <option value="unread">Actions Spectra can't read</option>
+          <option value="all">Those, and any output that lists paths</option>
+        </select>
+        {!nav.hasKey && <span className="hint small">Add an API key above first.</span>}
+      </label>
+      <p className="hint small">
+        {interp.mode === "off"
+          ? "Off: nothing a command prints leaves this machine. Unread actions are still listed under Oversight → Actions."
+          : "On: for each action it reads, the command and up to 6,000 characters of its output go to the Anthropic API, with credentials, tokens and email addresses masked first. Only targets that appear in that text and are in scope reach the map."}{" "}
+        {s.state === "error" && <span className="alert-text">{s.lastError} Fix the key or model above. </span>}
+        {s.read > 0 && `Read ${s.read} action${s.read === 1 ? "" : "s"} · last ${ago(s.lastRun)}. `}
+        {s.queued > 0 && `${s.queued} queued. `}
+        {interp.mode === "off" && interp.waiting > 0 && `${interp.waiting} unread action${interp.waiting === 1 ? " is" : "s are"} waiting with output in hand. `}
+        {s.state !== "error" && s.lastError && `Last error: ${s.lastError}`}
       </p>
     </section>
   );
@@ -296,6 +353,9 @@ function SetupChecklist({ health: h }: { health: Health }) {
       : navOn
         ? { state: "ok", name: "Navigator", detail: nav.status.runs ? `${nav.status.runs} assessment${nav.status.runs === 1 ? "" : "s"} · last ${ago(nav.status.lastRun)}` : nav.externalLastSeen ? `External process · last advice ${ago(nav.externalLastSeen)}` : "On, waiting for the map to change" }
         : { state: "optional", name: "Navigator", detail: nav.hasKey ? "Optional. A key is saved; turn it on above." : "Optional. Add an API key above to turn it on." },
+    h.actions.open
+      ? { state: "warn", name: "Actions", detail: `${h.actions.total} recorded · ${h.actions.open} Spectra couldn't read. See Oversight → Actions${h.interpreter.mode === "off" ? ", or turn the Interpreter on above" : ""}.` }
+      : { state: "ok", name: "Actions", detail: h.actions.total ? `${h.actions.total} recorded, all accounted for${h.actions.unread ? ` (${h.actions.unread} needed a second look)` : ""}` : "None yet" },
     h.proxy.lastImport
       ? { state: "ok", name: "Proxy history", detail: `Last import ${ago(h.proxy.lastImport)}` }
       : { state: "optional", name: "Proxy history", detail: "Optional. Use Import HAR to add what your proxy saw." },

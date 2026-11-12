@@ -51,7 +51,7 @@ npm run demo:recon # or the bigger one from the video: ~110 targets of recon
 
 The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then it imports a proxy history that reveals endpoints the agent never touched. When you're ready for a real engagement, follow the [setup guide](docs/setup.md).
 
-**Documentation:** [Getting started](docs/getting-started.md) · [Setup guide](docs/setup.md) · [Dashboard tour](docs/dashboard.md) · [The Navigator](docs/navigator.md) · [Proxy import](docs/proxy-import.md) · [Reference](docs/reference.md) · [Configuration](docs/configuration.md) · [Security model](docs/security.md) · [Troubleshooting](docs/troubleshooting.md)
+**Documentation:** [Getting started](docs/getting-started.md) · [Setup guide](docs/setup.md) · [Dashboard tour](docs/dashboard.md) · [The Navigator](docs/navigator.md) · [The Interpreter](docs/interpreter.md) · [Proxy import](docs/proxy-import.md) · [Reference](docs/reference.md) · [Configuration](docs/configuration.md) · [Security model](docs/security.md) · [Troubleshooting](docs/troubleshooting.md)
 
 ## See it in action
 
@@ -87,12 +87,14 @@ The **Tree** view lays the same surface out as **domain → subdomain → endpoi
 - A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools — that keeps new discoveries in frame as it grows.
 - Every URL becomes a **domain → subdomain → endpoint** tree; numeric IDs, UUIDs, hashes and tokens collapse to `:id` / `:token`, so you see the API's shape, not ten thousand one-off URLs.
 - A sortable **Surface** table and a collapsible **Tree** of the same map, with automatic tags and one filter bar shared with the graph.
+- **Read what commands found.** In-scope URLs printed in a command's output go on the map through a local scan, marked as found in output, not as traffic. The optional **Interpreter** has a second model read the output of scripts and scanners for hosts, endpoints and parameter names. [More →](docs/interpreter.md)
 - **Import proxy history** (HAR from browser DevTools or any proxy that exports it). Traffic merges onto the same map, and surface the agent never touched shows up as *unmapped* — a ready-made to-do list.
 - Code-review coverage: every in-scope file marked read, edited or **never opened**.
 
 **Stay inside the lines**
 - You define the scope (paths and hosts). Every out-of-scope read, write, exec or network call is flagged in red, with a desktop alert.
 - The agent has no tool to change scope or verdicts, and the hub rejects them on its annotation channel.
+- **Every action is accounted for.** Each tool call is classified: read, nothing to read, or *not read* — a script, a scanner, a URL built from a variable. Unread actions stay listed under **Oversight → Actions** until the Interpreter reads them or you dismiss them, so nothing the agent ran goes unmapped without you knowing.
 
 **Organize the hunt**
 - **Triage marks** on any target — To test, Testing, Tested, Skip — with notes, so recon turns into a worklist before you move to the next phase.
@@ -139,7 +141,7 @@ They're complementary: run the agent through your proxy, watch it in Spectra, th
    ```bash
    claude mcp add spectra -- "$(pwd)/node_modules/.bin/tsx" "$(pwd)/packages/server/src/mcp.ts"
    ```
-4. **Turn on the Navigator** (optional) — the second model that scores leads and checks findings. Open **Settings** in the dashboard, add its API key, press **Test connection**, and switch it on. (Or run it as its own process: `ANTHROPIC_API_KEY=… npm run validator`.)
+4. **Turn on the Navigator** (optional) — the second model that scores leads and checks findings. Open **Settings** in the dashboard, add its API key, press **Test connection**, and switch it on. (Or run it as its own process: `ANTHROPIC_API_KEY=… npm run validator`.) The **Interpreter**, in the same dialog, uses the same key to read the output of commands Spectra couldn't; it's off by default because it sends command output to the API.
 5. **Import proxy history** (optional) — click **Import HAR** in the dashboard, or:
    ```bash
    npm run import -- burp-history.har
@@ -154,6 +156,7 @@ flowchart LR
     CC -- "MCP annotations" --> H
     PX["Proxy history (HAR)"] -- "import" --> H
     NAV["Navigator"] <-- "read-only state / leads" --> H
+    INT["Interpreter (opt-in)"] <-- "unread command output / targets" --> H
     H["<b>Hub</b><br/>scope checks · dedupe<br/>hash-chained audit log"] -- "WebSocket" --> UI["Dashboard"]
 ```
 
@@ -164,12 +167,13 @@ Every event carries its source, and sources are trusted differently:
 | Hooks · log observer | Every tool call and result, the agent's reasoning | **Ground truth** — what actually ran |
 | MCP server | Discoveries, chain steps, findings | **Claims** — the agent's word |
 | Proxy import | Hosts, endpoints and parameter names from proxy history | **Observed traffic** — what crossed the wire |
+| Local URL scan · Interpreter | Hosts, endpoints and parameter names read out of command output | **Inference** — what a command printed, not a request anyone saw |
 | Navigator | Leads and finding verdicts | **Advice** — a second model's read |
-| Operator | Scope, review verdicts and triage marks | **Authority** — yours alone |
+| Operator | Scope, review verdicts, triage marks and dismissed actions | **Authority** — yours alone |
 
 ```
 packages/schema   Event types, the shared reducer and the HAR parser (hub, dashboard and replay share them)
-packages/server   Hub, log observer, scope checks, MCP server, Navigator, proxy import, hook script and installer
+packages/server   Hub, log observer, scope checks, MCP server, Navigator, Interpreter, proxy import, hook script and installer
 packages/web      Dashboard (React, Vite, d3-force)
 ```
 
@@ -177,7 +181,9 @@ The [reference](docs/reference.md) documents every MCP tool and hub route; [conf
 
 ## Security and privacy
 
-- **Local hub.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins. It makes no outbound connections unless you turn on the Navigator, which calls the Anthropic API. The dashboard also loads its fonts from Google Fonts.
+- **Local hub.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins. It makes no outbound connections unless you turn on the Navigator or the Interpreter, which call the Anthropic API. The dashboard also loads its fonts from Google Fonts.
+- **Command output stays local unless you opt in.** The hook forwards the output of shell, fetch and MCP tool calls to your local hub, which holds it in memory and never writes it to the audit log. It leaves the machine only if you turn on the Interpreter — with credentials, tokens and email addresses masked first, on a best-effort basis.
+- **Model output is checked, not trusted.** Command output is whatever the target sent back. Every target the Interpreter reports must appear in the command or its output and be in scope, and it arrives unmapped and labelled as inference. A planted instruction can at worst add a wrong in-scope candidate.
 - **The Navigator's key stays put.** A key entered in Settings is stored in `~/.spectra/settings.json`, readable only by you, and is never sent back to the browser.
 - **Tamper-evident.** Every event is appended to a hash-chained audit log; `npm run verify` checks it, and exported reports carry the head hash.
 - **Names, not values.** Proxy imports keep parameter names and drop query strings, bodies and credentials before anything reaches the hub.
@@ -188,7 +194,6 @@ Spectra is for testing you're **authorized** to do — your own code, a contract
 ## Roadmap
 
 - **Live proxy feed** — a passive mitmproxy add-on that streams traffic onto the map as it happens (today: HAR import). Ingest only: Spectra stays read-only.
-- **Response-aware recon** — opt-in extraction of links, routes and parameters from tool output.
 - **Report export** — findings with their attack chain and audit head hash, in bug-bounty report format.
 
 ## Development

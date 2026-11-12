@@ -1,6 +1,6 @@
 # Setup
 
-This is the full setup guide, in the order you'll do it: define the scope you're authorized for, connect Claude Code so every tool call reaches the hub, optionally register the MCP server so the agent can annotate the map, optionally turn on the Navigator, and import proxy history. It ends with a checklist to confirm everything works and the steps to remove Spectra again. The dashboard's **Settings** dialog covers three of these without a restart or a second terminal: the scope, the Navigator, and a live checklist of what's connected. It assumes you've installed Spectra and can run `npm start` — see [Getting started](getting-started.md) if not.
+This is the full setup guide, in the order you'll do it: define the scope you're authorized for, connect Claude Code so every tool call reaches the hub, optionally register the MCP server so the agent can annotate the map, optionally turn on the Navigator and the Interpreter, and import proxy history. It ends with a checklist to confirm everything works and the steps to remove Spectra again. The dashboard's **Settings** dialog covers these without a restart or a second terminal: the scope, the Navigator, the Interpreter, and a live checklist of what's connected. It assumes you've installed Spectra and can run `npm start` — see [Getting started](getting-started.md) if not.
 
 Throughout, `/path/to/target-repo` is the code you're testing and `example-shop.test` is the target host. Replace both with your own.
 
@@ -96,6 +96,8 @@ The installer merges Spectra's hook into six events — `SessionStart`, `UserPro
 
 **Restart any running Claude Code sessions** in that project (or all of them, for `--user`). Hooks load when a session starts.
 
+> **Upgrading Spectra?** The installed hook entry points at the hook script in your checkout, so pulling a new version updates the hook as well. Restart the hub (`npm start`) to run the new version. You don't need to run the installer again or restart Claude Code to get output forwarding: sessions that were already running pick it up on their next tool call.
+
 > **Installed the hooks before `PostToolUseFailure` was added?** Run the installer again, then restart Claude Code. Claude Code reports a failed tool call only through `PostToolUseFailure`; without it a failed command never gets a result, and its target stays **active** on the map. (Checked against Claude Code 2.1.303.)
 
 To remove them, run the same command with `--remove`:
@@ -112,6 +114,7 @@ The hook command contains the absolute path to `packages/server/bin/spectra-hook
 - It never prints to stdout (hook output can steer Claude Code) and always exits 0 (a non-zero exit can block a tool call).
 - It gives up on the hub after 300 ms, so a stopped hub never slows the agent down.
 - It sends the event name, session id, working directory, tool name and id, the tool input, the prompt text for `UserPromptSubmit`, and whether the call succeeded. It strips file contents and patches (`content`, `new_string`, `old_string`, `edits`, `new_source`) before sending.
+- For `Bash`, `BashOutput`, `WebFetch` and MCP tools other than Spectra's own, it also sends the call's **output** — the first 8,000 and last 4,000 characters of anything long — so the hub can read what a command found. It never sends the output of the file tools. The output goes to your local hub, is held in memory only, and isn't written to the audit log. Set `SPECTRA_HOOK_OUTPUT=0` in the environment you start Claude Code from to send none. See [Interpreter → Tool output](interpreter.md#tool-output).
 
 ### The log observer (fallback)
 
@@ -163,7 +166,7 @@ Adding a line like this to the target project's `CLAUDE.md` helps the agent use 
 
 ## 4. Turn on the Navigator (optional)
 
-The Navigator is a second model that reads the same map and scores where to dig. It needs an Anthropic API key and is the only part of Spectra that sends data off your machine.
+The Navigator is a second model that reads the same map and scores where to dig. It needs an Anthropic API key. It and the Interpreter, below, are the only parts of Spectra that send data off your machine, and both are off until you turn them on.
 
 **From Settings (recommended).** The hub runs the Navigator itself:
 
@@ -186,6 +189,15 @@ It prints `[navigator] watching ws://127.0.0.1:4317/ws with claude-opus-5-5` and
 
 Use one or the other, not both at once: each would assess every change, and you'd get duplicate advice. [Navigator](navigator.md) explains what it sends, what comes back and how to read it.
 
+### The Interpreter (optional)
+
+Spectra records every tool call, but it can only map the ones whose targets are written in the call. Scripts, scanners and commands built from variables are listed under **Oversight → Actions** as *not read*. In-scope URLs printed in a command's output are added to the map by a local scan that's always on. The Interpreter reads the rest, by sending each unread command and part of its output to the same model the Navigator uses.
+
+1. In **Settings → Navigator**, save an API key if you haven't. The Interpreter uses that key and model; the Navigator itself doesn't have to be running.
+2. In **Settings → Interpreter**, set **Read** to **Actions Spectra can't read**.
+
+It's off by default, because it's the one setting that sends command output off your machine. Credentials, tokens and email addresses are masked first, but masking is best-effort. Read [Interpreter](interpreter.md) before turning it on: what it sends, how its answers are checked, and what can still go wrong. The Interpreter runs in the hub only, and needs the hooks — the log observer doesn't carry output.
+
 ## 5. Import proxy history (optional)
 
 If you run the agent (or yourself) through an intercepting proxy, export its history as HAR and put it on the same map — from the dashboard's **Import HAR** button, or:
@@ -198,7 +210,7 @@ Only in-scope hosts are imported, and only parameter names, never values. See [P
 
 ## 6. Check that it works
 
-The quickest check is **Settings → Setup** in the dashboard: one row each for the hub, scope, Claude Code hooks, agent annotations (MCP), the Navigator, proxy history and the audit log, each marked ok, to-do, optional or warning, and refreshed every few seconds. Hooks, MCP and proxy history turn ok when their first event reaches the hub. See [Dashboard → Setup checklist](dashboard.md#setup-checklist).
+The quickest check is **Settings → Setup** in the dashboard: one row each for the hub, scope, Claude Code hooks, agent annotations (MCP), the Navigator, actions, proxy history and the audit log, each marked ok, to-do, optional or warning, and refreshed every few seconds. Hooks, MCP and proxy history turn ok when their first event reaches the hub. See [Dashboard → Setup checklist](dashboard.md#setup-checklist).
 
 To walk through it by hand, with the hub running and your scope set:
 
@@ -208,7 +220,8 @@ To walk through it by hand, with the hub running and your scope set:
 4. **Violations are flagged.** Ask the agent to read a harmless file outside your scope paths. The node turns red, the badge shows *1 out of scope*, **Oversight → Scope** lists the violation (*med* for a read with the `Read` tool, *high* if the agent used the shell), and a desktop alert appears.
 5. **MCP tools work** (if registered). Ask the agent to call `log_thought`; the note appears in the stream.
 6. **The Navigator answers** (if it's on). **Oversight → Navigator** fills with leads, and Settings shows *N assessments · last …*. The line `[navigator] posted N assessment(s) for session …` appears in the hub's terminal when it runs in the hub, or in its own terminal under `npm run validator`.
-7. **The audit log verifies.** The footer reads *Audit log verified · N events · head …*. From a terminal:
+7. **Actions are accounted for.** Ask the agent to run a script or a scanner. **Oversight → Actions** lists it as *Not read* with the reason, and the Oversight header shows *· 1 not read*. Dismiss it — or, with the Interpreter on, watch it turn to *Interpreted* or *Nothing to map* a few seconds after the command returns.
+8. **The audit log verifies.** The footer reads *Audit log verified · N events · head …*. From a terminal:
 
    ```bash
    npm run verify

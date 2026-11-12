@@ -1,4 +1,4 @@
-import { SEVERITY_RANK, TRIAGE_LABEL, type AuditVerification, type GraphState, type Severity } from "@spectra/schema";
+import { isUnsettled, SEVERITY_RANK, TRIAGE_LABEL, type AuditVerification, type GraphState, type Severity } from "@spectra/schema";
 import { STATUS_LABEL } from "./components/Status.tsx";
 import { indexSurface } from "./filters.ts";
 import { formatTool } from "./format.ts";
@@ -45,6 +45,21 @@ export function buildReport(state: GraphState, audit?: AuditVerification): strin
   }
   if (!findings.length) out.push(`| — | 0 | | | |`);
   out.push("", `Scope violations: ${violations.length} (${violations.filter((v) => v.severity === "high").length} high).`, "");
+
+  // Reconciliation: every action is recorded; say which ones Spectra couldn't read, and how each was settled.
+  const unread = Object.values(state.actions ?? {});
+  const open = unread.filter(isUnsettled);
+  out.push(
+    `Actions: ${state.counts.toolCalls} recorded, ${unread.length} Spectra couldn't read on its own` +
+      (unread.length ? ` (${unread.filter((a) => a.resolution === "interpreted" || a.resolution === "nothing").length} read by the Interpreter, ${unread.filter((a) => a.resolution === "dismissed").length} dismissed, ${open.length} still not read).` : "."),
+    "",
+  );
+  if (open.length) {
+    out.push("Not read — what these touched isn't on the map:", "");
+    for (const a of open.slice(0, 40)) out.push(`- \`${oneLine(a.summary)}\` (${a.reason})`);
+    if (open.length > 40) out.push(`- …and ${open.length - 40} more`);
+    out.push("");
+  }
 
   out.push(...surfaceSection(state));
 
@@ -93,7 +108,7 @@ export function buildReport(state: GraphState, audit?: AuditVerification): strin
     out.push("Not verified (audit log unavailable).", "");
   }
 
-  out.push("---", "", "_Findings marked agent-reported are the agent's own claims. Review verdicts and triage marks are the operator's. Navigator entries are a second model's advice. Tags are name-based heuristics, not findings. Shell-derived targets are pattern-matched and may be incomplete._", "");
+  out.push("---", "", "_Findings marked agent-reported are the agent's own claims. Review verdicts and triage marks are the operator's. Navigator entries are a second model's advice. Tags are name-based heuristics, not findings. Shell-derived targets are pattern-matched and may be incomplete. Targets with the source \"output (inferred)\" were read out of a command's output, by a URL scan or a second model, and weren't seen in a request._", "");
   return out.join("\n");
 }
 
@@ -111,7 +126,7 @@ function surfaceSection(state: GraphState): string[] {
   if (marks.length) out.push(`Triage: ${count("queued")} to test, ${count("testing")} testing, ${count("tested")} tested, ${count("skipped")} skipped.`);
   out.push("");
 
-  const source = (seen: unknown) => (seen === "proxy traffic" ? "proxy" : seen === "agent and proxy traffic" ? "agent + proxy" : "agent");
+  const source = (seen: unknown) => (seen === "proxy traffic" ? "proxy" : seen === "agent and proxy traffic" ? "agent + proxy" : seen === "command output" ? "output (inferred)" : "agent");
   for (const h of hosts) {
     const endpoints = nodes.filter((n) => n.category === "endpoints" && n.parentId === h.id);
     if (!endpoints.length && !state.triage[h.id]) continue;

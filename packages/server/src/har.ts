@@ -1,4 +1,4 @@
-import { emptySummary, describeImport, type GraphState, type HttpEntry, type ImportSummary, type MapNode, type SpectraEvent } from "@spectra/schema";
+import { OUTPUT_SEEN_IN, emptySummary, describeImport, type GraphState, type HttpEntry, type ImportSummary, type MapNode, type SpectraEvent } from "@spectra/schema";
 import { inScope } from "./scope.ts";
 import { apexOf, normalizeRoute } from "./toolmap.ts";
 
@@ -123,7 +123,8 @@ function trafficMeta(prevNode: MapNode | undefined, a: Agg): Record<string, unkn
   const methods = new Set([...list(prev?.methods), ...a.methods]);
   const statuses = new Set([...list(prev?.["status codes"]), ...[...a.statuses].map(String)]);
   // A node that existed without traffic came from the agent.
-  const seenIn = !prevNode ? "proxy traffic" : (prev?.["seen in"] ?? "agent and proxy traffic");
+  // Surface first read out of command output, now seen on the wire, is proxy traffic.
+  const seenIn = !prevNode || prev?.["seen in"] === OUTPUT_SEEN_IN ? "proxy traffic" : (prev?.["seen in"] ?? "agent and proxy traffic");
   return {
     "seen in": seenIn,
     requests: Number(prev?.requests ?? 0) + a.requests,

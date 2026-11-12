@@ -9,7 +9,7 @@ This page gets Spectra running on your machine and shows you what it does before
 | Node.js | 20 or later |
 | OS | macOS or Linux. Windows through WSL. |
 | Claude Code | Needed for real sessions. The demos don't need it. |
-| Anthropic API key | Only if you run the [Navigator](navigator.md). The demos don't need it. |
+| Anthropic API key | Only if you run the [Navigator](navigator.md) or the [Interpreter](interpreter.md). The demos don't need it. |
 
 ## Install
 
@@ -85,7 +85,7 @@ Set `SPECTRA_DEMO_PACE` below 1 to run it faster, for example `SPECTRA_DEMO_PACE
 | **Top bar** | The current session, the scope badge (red when anything went out of scope), Import HAR, Report, Settings, Replay, and whether the dashboard is live. |
 | **Attack Surface** (left) | The map, in five views: Graph, Tree, Surface, Files and Target. |
 | **Activity** (top right) | The agent's reasoning and tool calls as they happen, and a list of every target. |
-| **Oversight** (middle right) | Findings with their evidence, the Navigator's leads, and the scope with its violations. |
+| **Oversight** (middle right) | Findings with their evidence, the Navigator's leads, the actions Spectra couldn't read, and the scope with its violations. |
 | **Chain** (bottom left) | The attack chain: how individual steps connect into a finding. |
 | **Coverage** (bottom right) | How much of the map is unmapped, active or confirmed. |
 | **Footer** | The hub address, the audit log's status and head hash, and the time of the last event. |
@@ -105,6 +105,7 @@ A few things to try after the short demo:
 - [Setup](setup.md): set your scope and connect a real Claude Code session.
 - [Proxy import](proxy-import.md): put your own proxy history on the map.
 - [Navigator](navigator.md): add the second model that scores leads.
+- [Interpreter](interpreter.md): see which commands Spectra couldn't read, and have a model read their output.
 
 ---
 

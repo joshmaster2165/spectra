@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This page collects the failures you're most likely to hit, what each one looks like, and how to fix it: the hub not running or not reachable, hooks that don't fire, failed commands that stay active, scope that flags everything or nothing, proxy imports that find nothing in scope, the Navigator stopping or staying quiet, and audit logs that fail verification. Most problems come down to three things — the hub isn't where a client expects it, a Claude Code session started before its hooks were installed, or the scope isn't what you think it is. Check those first.
+This page collects the failures you're most likely to hit, what each one looks like, and how to fix it: the hub not running or not reachable, hooks that don't fire, failed commands that stay active, scope that flags everything or nothing, proxy imports that find nothing in scope, the Navigator stopping or staying quiet, actions that stay unread and an Interpreter that reads nothing, and audit logs that fail verification. Most problems come down to three things — the hub isn't where a client expects it, a Claude Code session started before its hooks were installed, or the scope isn't what you think it is. Check those first.
 
 ## Quick checks
 
@@ -11,7 +11,7 @@ curl -s http://127.0.0.1:4317/sessions                # what has it recorded?
 npm run verify                                        # do the audit logs verify?
 ```
 
-On the dashboard, open **Settings** and read the **Setup** checklist: it shows, row by row, whether the scope is set, whether hook events and MCP annotations have arrived, whether the Navigator is running or stopped on an error, and whether the audit log is on. Then look at the top bar (**Live** or **Offline**, and the scope badge) and **Oversight → Scope** (who set the scope, and what it contains).
+On the dashboard, open **Settings** and read the **Setup** checklist: it shows, row by row, whether the scope is set, whether hook events and MCP annotations have arrived, whether the Navigator is running or stopped on an error, how many actions Spectra couldn't read, and whether the audit log is on. Then look at the top bar (**Live** or **Offline**, and the scope badge) and **Oversight → Scope** (who set the scope, and what it contains).
 
 ## The hub
 
@@ -165,6 +165,72 @@ The `[navigator]` lines below appear in the hub's terminal when the Navigator ru
 | Some targets never get a lead | The digest holds 200 targets, attack surface first; on a bigger map the oldest files and commands drop out first, then the oldest surface. Out-of-scope targets never get leads. |
 | Stale leads | Leads persist until the Navigator assesses that target again; stopping the Navigator leaves them in place. |
 | The key is gone after a restart | The hub was started with a different `SPECTRA_SETTINGS`, or as a different user. The key lives in that one file. |
+
+## Actions and the Interpreter
+
+`GET /health` has the numbers behind this section: `actions` (`total`, `unread`, `open`) and `interpreter` (`mode`, `status`, `waiting`).
+
+```bash
+curl -s http://127.0.0.1:4317/health
+```
+
+### An action says Not read
+
+That's the normal state of a script, a scanner, a command whose URL comes from a variable, or a program Spectra doesn't know: the hub recorded it and can't tell what it touched. The row in **Oversight → Actions** gives the reason. It stays *Not read* until one of two things happens:
+
+- **You dismiss it.** Click **Dismiss** when nothing in it needs mapping — `docker ps`, a local script. **Dismiss all** settles every open one.
+- **The Interpreter reads it.** Turn it on in **Settings → Interpreter**. See [Interpreter](interpreter.md) for what that sends off your machine.
+
+If plain commands you'd expect Spectra to read are flagged, check the reason against [what Spectra can read on its own](interpreter.md#what-spectra-can-read-on-its-own). A `curl` with the URL written out is read; the same `curl` with `"$BASE/api"` isn't, unless `BASE=…` is assigned in the same command.
+
+### Nothing is interpreted
+
+The Interpreter is on, but actions stay *Not read*. It can only read an action whose output reached the hub and is still held there. Check, in this order:
+
+| Cause | How to tell | Fix |
+|---|---|---|
+| No key | The **Read** menu is greyed out with *Add an API key above first*. The pill may still say **Running**. | Save a key under **Navigator** in Settings, or start the hub with `ANTHROPIC_API_KEY` set. |
+| Output forwarding is off | `SPECTRA_HOOK_OUTPUT=0` is set in the environment Claude Code runs in. | Unset it and start Claude Code again. |
+| The session reports through the log observer, not hooks | The **Claude Code hooks** row in the Setup checklist says *No hook events yet*. | Install the hooks and restart the session — see [Hooks aren't firing](#hooks-arent-firing). The observer doesn't carry output. |
+| The hub was restarted | The actions are from before the restart. `interpreter.waiting` in `GET /health` is `0`. | Output is held in memory only, so it's gone. Dismiss those actions; new ones will be read. |
+| The command ran in the background | The reason is *Runs in the background, so its output never reaches Spectra*. | What it prints later doesn't arrive under that call, so dismiss it if it stays open. Output the agent collects afterwards with `BashOutput` still gets the local URL scan. |
+| The command printed nothing | An action with no output is never queued. | Dismiss it. |
+| More than 300 unread actions piled up while it was off | Only the newest 300 keep their output. | Dismiss the older ones. |
+| It's waiting its turn | Settings shows *N queued*. It reads up to five actions per request, at least four seconds apart. | Wait. |
+
+### An action says Nothing to map, or Couldn't read
+
+| State | Meaning |
+|---|---|
+| *Nothing to map* | The Interpreter read it and reported no targets, or every target it reported was dropped — out of scope, already on the map, or not shown by the output. *N left out* on the row counts the dropped ones. |
+| *Couldn't read* | Three model calls failed — rate limiting, a network problem, another API error — or the model declined to read it or left it out of its answer. The note says which. It still counts as not read: dismiss it, or change the key, model or mode in Settings, which restarts the Interpreter and reads it again while the hub still holds its output. |
+
+Neither is a statement that the command touched nothing. If the action matters, open it in **Target** and look at what the command did.
+
+### The Interpreter shows Stopped
+
+It hit an error it can't recover from, and stays stopped until its settings change. The reason is under the **Read** menu in **Settings**:
+
+| Reason shown | Fix |
+|---|---|
+| *The API key was rejected.* | Save a valid key under **Navigator**. |
+| *This key isn't allowed to use that model.* | Change **Model** under **Navigator** to one the key can use, or save a different key. |
+| *That model wasn't found.* | Correct the model id. |
+
+The key and model are the Navigator's, so fix them there and use **Test connection** to check. Saving restarts the Interpreter, and it reads the actions that were waiting: nothing is lost while it's stopped.
+
+### Other problems
+
+| Symptom | Cause and fix |
+|---|---|
+| A target shows **output** as its source and you can't find the request | There wasn't one. It was read out of a command's output by the local URL scan or the Interpreter. Open it in **Target**: *read by* says which, and the *found* edge leads to the command. |
+| A target the Interpreter added doesn't exist | The model read the output wrongly, or the output was written to mislead it. The checks keep such a target in scope and unmapped, not correct. See [What can still go wrong](interpreter.md#what-can-still-go-wrong). |
+| URLs a command printed aren't on the map | The local scan adds only absolute `http(s)` URLs on in-scope hosts, and nothing when no scope is set. Relative paths need the Interpreter. |
+| An out-of-scope URL in a command's output wasn't flagged | Expected. Printing a URL isn't contacting it, so it's ignored rather than flagged. |
+| `[interpreter] model call failed: …` in the hub's terminal | The reason follows. Fatal ones stop it (see above); anything else is retried after 30 seconds. |
+| **Dismiss** is missing | You're replaying a recorded session. Go **Back to live**. |
+| The Setup checklist's **Actions** row shows a warning | At least one action is unread. It clears when they're all dismissed or read. |
+| Everything gets flagged as *Spectra doesn't know the … command* | The hub recognizes local text utilities, common build and test tools, HTTP clients and scanners. Anything else is flagged so that nothing goes unaccounted for. Dismiss them. |
 
 ## Audit log fails verification
 

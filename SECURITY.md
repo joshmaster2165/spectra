@@ -16,12 +16,13 @@ The Navigator is built for triage: it ranks where to look and checks findings ag
 
 Please report vulnerabilities in Spectra itself privately through GitHub: on the repository's **Security** tab, choose **Report a vulnerability**. Don't open a public issue for a security problem.
 
-Useful details include the affected component (hub, hook, MCP server, Navigator or dashboard), the version or commit, steps to reproduce, and the impact you see. You'll get an acknowledgement, and the fix will be credited to you unless you'd rather it wasn't.
+Useful details include the affected component (hub, hook, MCP server, Navigator, Interpreter or dashboard), the version or commit, steps to reproduce, and the impact you see. You'll get an acknowledgement, and the fix will be credited to you unless you'd rather it wasn't.
 
 Areas of particular interest:
 
 - anything that lets a non-local web page read hub state or post events,
 - ways for the agent's annotation channel to forge scope, operator verdicts or Navigator output,
+- ways for text in a target's responses to put out-of-scope or unevidenced targets on the map through the Interpreter, or to get command output past its masking,
 - audit-log tampering that `npm run verify` fails to detect,
 - the hook altering, blocking or delaying a Claude Code tool call.
 

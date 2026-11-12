@@ -1,6 +1,6 @@
 # Navigator
 
-The Navigator is an optional second model that sits in the "second seat". Claude Code — the driver — acts on the target; you, the operator, set the scope and decide; the Navigator only reads. It sees the same map you see, points at where the promise is with scored **leads** (pursue, watch or skip, a suspected bug class, a confidence and a rationale), and gives an independent **verdict** on each finding the driver reports. It never touches the target, can't set the scope, your verdicts or your triage marks, and is the only part of Spectra that sends data off your machine. You can run it inside the hub, switched on from the dashboard's **Settings**, or as a separate process.
+The Navigator is an optional second model that sits in the "second seat". Claude Code — the driver — acts on the target; you, the operator, set the scope and decide; the Navigator only reads. It sees the same map you see, points at where the promise is with scored **leads** (pursue, watch or skip, a suspected bug class, a confidence and a rationale), and gives an independent **verdict** on each finding the driver reports. It never touches the target, and it can't set the scope, your verdicts or your triage marks. It's one of the two parts of Spectra that send data off your machine; the other is the [Interpreter](interpreter.md), which shares its seat, key and model, and both are opt-in. You can run the Navigator inside the hub, switched on from the dashboard's **Settings**, or as a separate process.
 
 ## What it is
 
@@ -30,8 +30,8 @@ There are two ways to run the Navigator. Use one or the other, not both at once:
 
 What to know:
 
-- **The hub makes the calls.** While the box is ticked, the hub process itself calls the Anthropic API. With it unticked, the hub makes no outbound connections, apart from one request each time you click **Test connection**.
-- **Where the key lives.** The hub writes it to `~/.spectra/settings.json` (or the file named by `SPECTRA_SETTINGS`), readable and writable only by you (mode `600`). The key is write-only from the dashboard: the hub returns only whether a key is saved and its last four characters, never the key. **Remove** deletes it and turns the Navigator off.
+- **The hub makes the calls.** While the box is ticked, the hub process itself calls the Anthropic API. With it unticked, the hub makes no outbound connections, apart from one request each time you click **Test connection** — unless the [Interpreter](#the-interpreter) is on, which makes calls of its own.
+- **Where the key lives.** The hub writes it to `~/.spectra/settings.json` (or the file named by `SPECTRA_SETTINGS`), readable and writable only by you (mode `600`). The key is write-only from the dashboard: the hub returns only whether a key is saved and its last four characters, never the key. **Remove** deletes it and turns the Navigator off. The Interpreter uses the same key, so it stops reading too, unless the hub has a key in its environment.
 - **A key in the environment works too.** If the hub was started with `ANTHROPIC_API_KEY` set and no key is saved, Settings shows that it's using the environment's key. A key saved in Settings takes its place.
 - **It stays on.** The setting is saved with the key, so the Navigator starts again with the hub until you untick the box.
 - **Saving a setting restarts it.** A new key, model or on/off change starts a fresh Navigator, which reassesses the map as it stands, and its assessment count starts again from zero.
@@ -73,7 +73,7 @@ Stopping the Navigator, either way, leaves its leads and verdicts on the map and
 2. **It waits for a quiet period.** Every event restarts a timer — new targets, tool calls and findings, and also your triage marks, reviews and scope changes. When no event has arrived for 2.5 seconds (`SPECTRA_VALIDATOR_IDLE_MS`), it assesses the map — but never more often than once every 15 seconds, and never while a previous assessment is still running. Its own posts don't restart the timer. An empty map isn't assessed.
 3. **It sends a digest.** The model gets a compact text summary of the state, not the raw events:
    - the scope (paths and hosts) and who set it;
-   - up to 200 targets — the attack surface (hosts, endpoints, parameters) first, newest first, then files, searches and commands — each with its id, label, kind, status, category, proxy-traffic details (*seen in*, request count, status codes), your [triage mark](dashboard.md#triage) if you set one (the mark, not your note), an `[OUT OF SCOPE]` tag where it applies, and the lead it gave that target last time;
+   - up to 200 targets — the attack surface (hosts, endpoints, parameters) first, newest first, then files, searches and commands — each with its id, label, kind, status, category, proxy-traffic details (*seen in*, request count, status codes) or, for a target read out of a command's output, *found in command output, not requested directly*, your [triage mark](dashboard.md#triage) if you set one (the mark, not your note), an `[OUT OF SCOPE]` tag where it applies, and the lead it gave that target last time;
    - every finding with its severity, status, who reported it, location, description, and the titles of its chain steps;
    - counts of unexplored, active and complete targets.
 4. **It gets leads and verdicts back through a tool call.** The model is given one tool, `submit_navigation`, and asked to call it once with a list of leads and a list of finding verdicts.
@@ -111,6 +111,22 @@ Each verdict carries a 0–1 confidence and a rationale. A new verdict replaces 
 
 Targets seen only in imported proxy history (*seen in proxy traffic*) crossed the wire but were never tested by the driver. The Navigator is told this and treats them as strong candidates when they look sensitive — an admin route the proxy saw succeed is a typical *pursue*. See [Proxy import](proxy-import.md).
 
+## Targets found in command output
+
+Targets with the property *seen in: command output* were read out of what a command printed — by the hub's local URL scan or by the Interpreter — and nobody has requested them directly. The digest describes them as *found in command output, not requested directly*, with the status code if the output gave one, and the prompt tells the Navigator to treat them as good leads held a little more loosely than traffic that was actually observed. Once the driver requests one, it's ordinary agent traffic.
+
+## The Interpreter
+
+The second seat has one more job, with a switch of its own. The Interpreter reads the commands the hub couldn't — scripts, scanners, URLs built from variables — by giving a model the command and part of its output, and puts the hosts, endpoints and parameter names it finds on the map, marked as found in output.
+
+- **It shares the Navigator's key and model.** Whatever you save under **Navigator** in Settings — or the hub's `ANTHROPIC_API_KEY` and `SPECTRA_VALIDATOR_MODEL` — is what it uses.
+- **Its switch is separate.** Choose what it reads under **Interpreter** in Settings. It doesn't need **Run the Navigator in the hub** ticked, and turning the Navigator off doesn't turn it off.
+- **It runs only in the hub.** `npm run validator` runs the Navigator alone.
+- **It sends something different.** The Navigator sends a digest of the map. The Interpreter sends command output, masked first, which can hold more than a digest ever does. Read [what it sends](interpreter.md#what-it-sends) before you turn it on.
+- **Its output is inference, not advice.** It adds unmapped targets with the source `interpreter`; it can't post leads or verdicts, and the Navigator can't add targets.
+
+[Interpreter](interpreter.md) covers what gets flagged as unread, how to turn it on, the checks on what the model returns, and its limits.
+
 ## Guardrails
 
 - **Never advises on out-of-scope targets.** The prompt forbids it, and independently of the model, any lead for a target marked out of scope is discarded before it reaches the hub.
@@ -130,11 +146,11 @@ Targets seen only in imported proxy history (*seen in proxy traffic*) crossed th
 
 Fixed in the code: at most one assessment every 15 seconds, at most 200 targets in the digest, and at most 4,000 output tokens per assessment.
 
-The settings file and `SPECTRA_SETTINGS` are described in [Configuration](configuration.md#the-settings-file).
+The Interpreter uses the key and model from the *In the hub* column. The settings file and `SPECTRA_SETTINGS` are described in [Configuration](configuration.md#the-settings-file).
 
 ## Cost and egress
 
-- **Egress.** The Navigator is the one part of Spectra that connects outside your machine, to the Anthropic API. The process making the calls is the hub itself when the Navigator is turned on in Settings, or the `npm run validator` process otherwise. What it sends is the digest above, which includes target ids and labels — file paths, shell commands, hostnames and URL paths — the scope, your triage marks, and finding titles and descriptions. It doesn't send file contents or your triage notes. **Test connection** sends one short fixed prompt and nothing from the map. Leave the Navigator off for zero egress.
+- **Egress.** The Navigator and the [Interpreter](interpreter.md) are the only parts of Spectra that connect outside your machine, both to the Anthropic API, and each has its own switch. This bullet covers the Navigator. The process making the calls is the hub itself when the Navigator is turned on in Settings, or the `npm run validator` process otherwise. What it sends is the digest above, which includes target ids and labels — file paths, shell commands, hostnames and URL paths — the scope, your triage marks, and finding titles and descriptions. It doesn't send file contents or your triage notes. **Test connection** sends one short fixed prompt and nothing from the map. Leave the Navigator and the Interpreter off for zero egress.
 - **Cost.** One model call per assessment, at most one every 15 seconds while the map keeps changing, and none while it's idle. Input grows with the map up to the 200-target cap; output is capped at 4,000 tokens. A long, busy session means many calls — turn the Navigator off when you don't need it. Marking triage and changing the scope count as changes, so they trigger a reassessment too.
 - **Coverage limit.** The digest holds 200 targets. On a larger map the attack surface is kept, newest first, and files, searches and commands drop out first; on a very large surface the oldest hosts and endpoints go too.
 
@@ -153,4 +169,4 @@ Treat a lead as a second opinion on where to look next, not as evidence. A *corr
 
 ---
 
-**Next:** [Proxy import](proxy-import.md)
+**Next:** [Interpreter](interpreter.md)

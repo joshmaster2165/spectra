@@ -102,6 +102,11 @@ export class Translator {
       nodeId: leaf.id,
       targets,
     });
+    // Recorded either way; flagged when the hub can't tell what it touched.
+    const reason = opaqueReason(t.name, t.input, targets);
+    if (reason) {
+      this.emit({ ...base, type: "action.open", action: { toolUseId: t.id, tool: t.name, summary: summarize(t.name, t.input), nodeId: leaf.id, reason } });
+    }
   }
 
   /**
@@ -237,7 +242,14 @@ function scanShell(rawCmd: string): { kind: "path" | "host"; value: string }[] {
   for (const m of cmd.matchAll(/\bhttps?:\/\/[^\s'"`|;&<>)]+/gi)) {
     // `?` and `*` are legitimate in a query string, so check only the URL path.
     const beforeQuery = m[0].split("?")[0];
-    if (!unresolved(m[0]) && !/[*]/.test(beforeQuery)) found.push({ kind: "host", value: m[0] });
+    if (unresolved(m[0]) || /[*]/.test(beforeQuery)) continue;
+    // A fuzzer's placeholder (ffuf, wfuzz) isn't a path: keep the part of the URL before it.
+    const fuzz = m[0].search(/\bFUZZ\b|\bFUZ\dZ\b/);
+    const query = m[0].indexOf("?");
+    if (fuzz < 0) found.push({ kind: "host", value: m[0] });
+    // Fuzzing a parameter's value: the endpoint itself is real.
+    else if (query >= 0 && fuzz > query) found.push({ kind: "host", value: m[0].slice(0, query) });
+    else if (m[0].slice(0, fuzz).replace(/^https?:\/\//i, "").includes("/")) found.push({ kind: "host", value: m[0].slice(0, m[0].lastIndexOf("/", fuzz) + 1) });
   }
   for (const m of cmd.matchAll(/\b(?:ssh|scp|rsync|sftp)\b[^|;&]*?\b[\w.-]+@([\w.-]+\.[a-z]{2,}|\d+\.\d+\.\d+\.\d+)/gi)) {
     found.push({ kind: "host", value: `ssh://${m[1]}` });
@@ -298,6 +310,100 @@ export function expandShell(cmd: string): string {
   // Then substitute scalar variables (a base URL used inside the loop body).
   for (const [name, value] of vars) out = subst(out, name, value);
   return out;
+}
+
+/* ── Did the hub understand this action? ───────────────── */
+
+/** Programs that only read, print or reshape local data: nothing to map. */
+const INERT = new Set(
+  (
+    "cd echo printf cat head tail wc sort uniq cut tr sed awk gawk grep egrep fgrep rg jq yq ls pwd mkdir touch cp mv rm rmdir ln test [ [[ true false sleep date read export set unset local " +
+    "declare tee column less more file stat find which type basename dirname diff comm paste rev seq xxd base64 md5 md5sum shasum sha1sum sha256sum git tree du df ps kill wait chmod " +
+    "clear history alias tput nl fold strings hexdump od zcat gunzip gzip tar unzip zip sum bc expr tac shuf fmt realpath readlink mktemp return exit break continue : pbcopy pbpaste open " +
+    // Build, package and test tools: they work on the project, not the target.
+    "npm pnpm yarn pip pip3 brew cargo make cmake tsc eslint prettier pytest jest vitest rustc gcc g++ clang javac mvn gradle"
+  ).split(" "),
+);
+/** HTTP clients whose target is written in the command, so the URL scan reads them. */
+const HTTP_CLIENTS = new Set(["curl", "wget", "http", "https", "xh"]);
+/** Tools whose discoveries are in their output, or whose targets come from a list. */
+const DISCOVERY = new Set(
+  (
+    "ffuf gobuster dirsearch feroxbuster wfuzz dirb httpx httpx-toolkit nuclei nmap masscan naabu amass subfinder assetfinder findomain dnsx puredns massdns katana gau waybackurls hakrawler gospider " +
+    "sqlmap nikto whatweb wpscan arjun paramspider dalfox kxss gf unfurl anew dig host nslookup whois ping traceroute nc ncat netcat telnet ssh openssl testssl testssl.sh sslscan wafw00f"
+  ).split(" "),
+);
+const SCRIPT_RUNNERS = new Set("python python2 python3 node deno bun ruby perl php bash sh zsh fish go java npx uvx uv pipx tsx ts-node pwsh osascript".split(" "));
+/** Words before the program that aren't the program. */
+const WRAPPERS = new Set("sudo time nohup command exec env nice stdbuf unbuffer builtin".split(" "));
+const KEYWORDS = new Set("do done then else elif fi if while until in esac case { } ! function select".split(" "));
+/** Claude Code's own bookkeeping tools: nothing reaches the target through them. */
+const LOCAL_TOOLS = /^(Read|Edit|MultiEdit|Write|NotebookEdit|NotebookRead|LS|Glob|Grep|BashOutput|KillBash|KillShell|WebSearch|Agent|Skill|SlashCommand|ToolSearch|AskUserQuestion|(Task|Todo|Cron|Schedule|EnterPlan|ExitPlan|EnterWorktree|ExitWorktree|ListMcp|ReadMcp|SendMessage|ListAgents|Monitor)\w*)$/;
+
+/** The program each simple command in a shell line runs, in order. */
+export function programsOf(cmd: string): string[] {
+  const bare = cmd
+    .replace(/\\\n/g, " ")
+    .replace(/'[^']*'/g, " Q ")
+    .replace(/"(?:[^"\\]|\\.)*"/g, " Q ");
+  const out: string[] = [];
+  for (const segment of bare.split(/\n|;|&&|\|\||\||&|\$\(|`|\(|\)/)) {
+    const words = segment.trim().split(/\s+/).filter(Boolean);
+    let i = 0;
+    while (i < words.length) {
+      const w = words[i];
+      if (w === "for" || w === "select") break; // `for x in a b c`: a list, not a program
+      if (KEYWORDS.has(w) || WRAPPERS.has(w) || /^[A-Za-z_]\w*=/.test(w) || /^-/.test(w)) i++;
+      else if (w === "timeout" || w === "xargs" || w === "watch") {
+        i++;
+        while (i < words.length && /^(-|\d)/.test(words[i])) i++; // their own flags and durations
+      } else break;
+    }
+    const w = words[i];
+    if (!w || w === "for" || w === "select" || w === "Q" || /^[<>0-9]/.test(w)) continue;
+    out.push(w);
+  }
+  return out;
+}
+
+/**
+ * Why the hub can't vouch for what a tool call touched — or undefined when it
+ * read the call fully or there was nothing to read. A flagged action stays
+ * open in the dashboard until the interpreter or the operator resolves it.
+ */
+export function opaqueReason(tool: string, input: Input, targets: Target[]): string | undefined {
+  const hosts = targets.filter((t) => t.kind === "host").length;
+  if (tool !== "Bash") {
+    if (LOCAL_TOOLS.test(tool) || tool.startsWith("mcp__spectra")) return;
+    if (hosts) return;
+    return tool.startsWith("mcp__") ? "A tool call with no target Spectra can read" : tool === "WebFetch" ? "A fetch with no readable address" : `Spectra doesn't know the ${tool} tool`;
+  }
+  if (typeof input.command !== "string" || !input.command.trim()) return;
+  const cmd = expandShell(input.command);
+  if (input.run_in_background === true) return "Runs in the background, so its output never reaches Spectra";
+  // A URL still built from a variable or a subcommand after expansion.
+  const noSingles = cmd.replace(/'[^']*'/g, " ");
+  if (/\bhttps?:\/\/[^\s'"`|;&<>)]*[$`]/i.test(noSingles)) return "A URL is built from a value Spectra couldn't resolve";
+  for (const raw of programsOf(cmd)) {
+    const prog = raw.replace(/^.*\//, "");
+    if (raw.startsWith("./") || raw.startsWith("../") || /\.(sh|py|rb|pl|js|mjs|ts|php)$/.test(raw)) return `Runs a script (${prog}), so its targets aren't in the command`;
+    if (/[$`]/.test(raw)) return "Runs a program named by a variable";
+    if (INERT.has(prog)) continue;
+    if (HTTP_CLIENTS.has(prog)) {
+      if (!hosts) return `${prog} was given a target Spectra couldn't resolve`;
+      if (prog === "wget" && /\s-(i|-input-file)\b/.test(cmd)) return "wget reads its targets from a file";
+      if (prog === "curl" && /\s(-K|--config)\b/.test(cmd)) return "curl reads its targets from a config file";
+      continue;
+    }
+    if (DISCOVERY.has(prog)) return `${prog}'s results are in its output`;
+    if (SCRIPT_RUNNERS.has(prog)) {
+      // Version checks and the JSON pretty-printer are plain local use.
+      if (/\s(--version|-V|-v)\s*$/.test(cmd) || /\s-m\s+json\.tool\b/.test(cmd)) continue;
+      return `Runs code through ${prog}, so its targets aren't in the command`;
+    }
+    return `Spectra doesn't know the ${prog} command`;
+  }
+  return;
 }
 
 function resolvePath(p: string, cwd?: string): string | undefined {

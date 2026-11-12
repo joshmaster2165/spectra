@@ -20,6 +20,7 @@ export default defineConfig({
       "/health": HUB,
       "/triage": HUB,
       "/engagement": HUB,
+      "/actions": HUB,
       "/navigator": HUB,
       "/scope": HUB,
     },

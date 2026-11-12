@@ -1,12 +1,12 @@
 import { useContext, useMemo, useRef, useState, type ReactNode } from "react";
-import { TRIAGE_LABEL, type Assessment, type GraphState, type MapNode, type NodeStatus, type SurfaceTag, type Triage, type TriageState } from "@spectra/schema";
+import { OUTPUT_SEEN_IN, TRIAGE_LABEL, type Assessment, type GraphState, type MapNode, type NodeStatus, type SurfaceTag, type Triage, type TriageState } from "@spectra/schema";
 import { FilterBar } from "../components/FilterBar.tsx";
 import { Segmented } from "../components/Panel.tsx";
 import { Confidence, STATUS_LABEL, StatusChip } from "../components/Status.tsx";
 import { matches, postTriage, ReadOnly, type SurfaceFilter, type SurfaceIndex } from "../filters.ts";
 
 type Show = "endpoints" | "hosts" | "params";
-type Source = "agent" | "proxy" | "both";
+type Source = "agent" | "proxy" | "both" | "output";
 
 interface Row {
   id: string;
@@ -49,13 +49,18 @@ const NEW_MS = 2200;
 const leadScore = (a?: Assessment) => (a ? REC_RANK[a.recommendation] + a.confidence : 0);
 const sourceOf = (n: MapNode): Source => {
   const seen = n.meta?.["seen in"];
-  return seen === "proxy traffic" ? "proxy" : seen === "agent and proxy traffic" ? "both" : "agent";
+  return seen === "proxy traffic" ? "proxy" : seen === "agent and proxy traffic" ? "both" : seen === OUTPUT_SEEN_IN ? "output" : "agent";
 };
 const isHost = (n: MapNode) => n.category === "hosts" && (n.id.startsWith("domain:") || n.id.startsWith("host:"));
 
 const order: Col = { key: "order", label: "#", num: true, value: (r) => r.order, render: (r) => r.order, className: "dim" };
 const status: Col = { key: "status", label: "Status", value: (r) => STATUS_RANK[r.status], render: (r) => <StatusChip status={r.status} />, text: (r) => STATUS_LABEL[r.status] };
-const source: Col = { key: "source", label: "Source", value: (r) => r.source, render: (r) => <span className={`src ${r.source}`}>{r.source}</span> };
+const source: Col = { key: "source", label: "Source", value: (r) => r.source, render: (r) => (
+    <span className={`src ${r.source}`} title={r.source === "output" ? "Found in a command's output, not in a request Spectra saw" : undefined}>
+      {r.source}
+    </span>
+  ),
+};
 const tags: Col = {
   key: "tags",
   label: "Tags",

@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import {
   applyEvent,
   emptyState,
+  isUnsettled,
   HUB_ONLY_EVENTS,
   VALIDATOR_ONLY_EVENTS,
   type GraphState,
@@ -24,6 +25,8 @@ import { importEntries } from "./har.ts";
 import { DEFAULT_MODEL, Navigator, type NavigatorStatus } from "./navigator.ts";
 import { SettingsStore } from "./settings.ts";
 import { EngagementStore } from "./engagement.ts";
+import { inferEntries, listsPaths, mineUrls } from "./infer.ts";
+import { Interpreter, type Interpretation, type InterpreterStatus } from "./interpreter.ts";
 import { inScope, makeScope, severityOf, type ScopeConfig } from "./scope.ts";
 import { AuditLog } from "./audit.ts";
 
@@ -86,6 +89,7 @@ const MIME: Record<string, string> = {
  *   POST /triage           operator's mark on a target { nodeId, state, note }
  *   POST /scope            operator sets the scope { paths, hosts }
  *   POST /engagement/new   operator clears the live map and starts a new engagement
+ *   POST /actions/resolve  operator settles an action the hub couldn't read { toolUseId | all, note }
  *   POST /review           operator verdict on a finding { findingId, verdict, note }
  *   GET  /files            files under the scope paths, for review coverage
  *   WS   /ws               snapshot on connect, then { kind: "event" } messages
@@ -109,6 +113,15 @@ export class Hub {
   private settings: SettingsStore;
   /** The Navigator, when it's turned on in Settings and has a key. */
   private navigator?: Navigator;
+  /** The Interpreter, when it's turned on in Settings and has a key. */
+  private interpreter?: Interpreter;
+  /**
+   * The full input and output of actions still waiting to be read. Held in
+   * memory only — never written to the audit log or sent to a dashboard.
+   */
+  private actionData = new Map<string, { sessionId: string; tool: string; input: string; output?: string }>();
+  /** Tool-use id → the command's node, to link a command to what its output revealed. */
+  private callNodes = new Map<string, string>();
   /** When each channel last delivered something, for the setup checklist. */
   private seen: { hook?: number; mcp?: number; validator?: number; import?: number } = {};
   private startedAt = Date.now();
@@ -132,6 +145,7 @@ export class Hub {
     }
     this.settings = new SettingsStore(opts.settingsFile);
     this.configureNavigator();
+    this.configureInterpreter();
     this.applyConfiguredScope();
   }
 
@@ -194,6 +208,9 @@ export class Hub {
     this.seenToolCalls.clear();
     this.seenToolResults.clear();
     this.sessionCwds.clear();
+    this.actionData.clear();
+    this.callNodes.clear();
+    this.configureInterpreter(); // drops anything queued for the old map
     this.restored = null;
     // Sessions still running introduce themselves again on their next event.
     this.hooks.forget();
@@ -205,6 +222,7 @@ export class Hub {
   /** Flush the audit logs before the process exits. */
   async close() {
     this.navigator?.stop();
+    this.interpreter?.stop();
     await this.audit?.close();
   }
 
@@ -219,7 +237,10 @@ export class Hub {
       event = { ...event, finding: { ...event.finding, sessionId: event.sessionId } };
     }
     this.commit(event);
-    if (event.type === "tool.call") this.linkFixes(event);
+    if (event.type === "tool.call") {
+      this.linkFixes(event);
+      if (event.nodeId) remember(this.callNodes, event.toolUseId, event.nodeId, 2000);
+    }
 
     if (event.type === "session.start" && event.cwd) {
       this.sessionCwds.set(event.sessionId, event.cwd);
@@ -328,17 +349,26 @@ export class Hub {
         keyHint: key ? `…${key.slice(-4)}` : null,
         status,
       },
+      interpreter: {
+        mode: this.settings.get().interpreter.mode ?? "off",
+        status: this.interpreter?.status() ?? ({ state: "off", model, read: 0, queued: 0 } satisfies InterpreterStatus),
+        /** Unread actions whose output the hub still holds, so turning the Interpreter on can read them. */
+        waiting: [...this.actionData].filter(([id, d]) => d.output && this.isOpen(id)).length,
+      },
     };
   }
 
-  private updateSettings(patch: { apiKey?: unknown; model?: unknown; enabled?: unknown }) {
+  private updateSettings(patch: { apiKey?: unknown; model?: unknown; enabled?: unknown }, interpreterMode?: unknown) {
     const next: { apiKey?: string; model?: string; enabled?: boolean } = {};
     // "" clears a saved key or model; anything else must look like one.
     if (typeof patch.apiKey === "string" && patch.apiKey.length <= 400 && !/\s/.test(patch.apiKey)) next.apiKey = patch.apiKey;
     if (typeof patch.model === "string" && /^[\w.:-]{0,80}$/.test(patch.model)) next.model = patch.model;
     if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
-    this.settings.update(next);
-    this.configureNavigator();
+    const mode = interpreterMode === "unread" || interpreterMode === "all" ? interpreterMode : interpreterMode === "off" ? null : undefined;
+    this.settings.update(next, mode);
+    // Only restart what changed: a restarted Navigator reassesses the whole map.
+    if (Object.keys(next).length) this.configureNavigator();
+    if ("apiKey" in next || "model" in next || mode !== undefined) this.configureInterpreter();
     return this.settingsView();
   }
 
@@ -363,6 +393,13 @@ export class Hub {
       mcp: { lastSeen: this.seen.mcp ?? null },
       proxy: { lastImport: this.seen.import ?? null },
       navigator: { ...this.settingsView().navigator, externalLastSeen: this.seen.validator ?? null },
+      interpreter: this.settingsView().interpreter,
+      // Every tool call is recorded; these are the ones the hub couldn't read, and how many are still open.
+      actions: {
+        total: this.state.counts.toolCalls,
+        unread: Object.keys(this.state.actions).length,
+        open: Object.values(this.state.actions).filter(isUnsettled).length,
+      },
       // Shown in the dashboard: abbreviate the home directory.
       audit: { enabled: !!this.audit, dir: this.opts.dataDir?.replace(os.homedir(), "~") ?? null },
       engagement: this.engagement ? { started: this.engagement.get().started, sessions: this.engagement.get().sessions.length, restored: this.restored } : null,
@@ -443,14 +480,120 @@ export class Hub {
         break;
       case "PreToolUse":
         this.hooks.toolUse({ sessionId, cwd: p.cwd, id: toolUseId, name: p.tool_name, input: p.tool_input ?? {}, ts });
+        // Flagged as unread: keep the whole call for whoever reads it.
+        if (this.isOpen(toolUseId)) remember(this.actionData, toolUseId, { sessionId, tool: String(p.tool_name), input: describeInput(p.tool_input) }, 300);
         break;
       case "PostToolUse":
       case "PostToolUseFailure":
         this.hooks.toolResult(sessionId, toolUseId, p.hook_event_name === "PostToolUse" && p.ok !== false, ts);
+        // A background command returns only its launch notice; its real output never arrives here.
+        if (typeof p.output === "string" && p.output.trim() && p.tool_input?.run_in_background !== true) this.readOutput(sessionId, toolUseId, String(p.tool_name), p.tool_input, p.output.slice(0, 20_000));
         break;
       case "SessionEnd":
         this.hooks.end(sessionId, ts, p.reason);
         break;
+    }
+  }
+
+  /* ── Reading what the hub couldn't ───────────────────── */
+
+  /** Unread and not settled; a read that gave up counts, so it can be retried or dismissed. */
+  private isOpen(toolUseId: string) {
+    const a = this.state.actions[toolUseId];
+    return !!a && isUnsettled(a);
+  }
+
+  /**
+   * A tool call's output arrived. In-scope URLs printed in it go on the map
+   * straight away (a local scan). If the call is one the hub couldn't read,
+   * its output is kept for the Interpreter.
+   */
+  private readOutput(sessionId: string, toolUseId: string, tool: string, input: unknown, output: string) {
+    const fromNodeId = this.callNodes.get(toolUseId) ?? this.state.actions[toolUseId]?.nodeId;
+    const { events } = inferEntries(this.state, mineUrls(output), { sessionId, source: "hub", fromNodeId });
+    for (const e of events) this.publish(e);
+
+    const mode = this.settings.get().interpreter.mode;
+    // "All output": a call the hub did read, whose output lists places the map may not have.
+    if (mode === "all" && this.interpreter && !this.state.actions[toolUseId] && tool !== "BashOutput" && listsPaths(output)) {
+      const summary = [...this.state.timeline].reverse().find((e) => e.type === "tool.call" && e.toolUseId === toolUseId);
+      this.commit({
+        ts: Date.now(),
+        sessionId,
+        source: "hub",
+        type: "action.open",
+        action: { toolUseId, tool, summary: summary?.type === "tool.call" ? summary.summary : tool, nodeId: fromNodeId, reason: "Its output lists paths Spectra can't place on its own" },
+      });
+      remember(this.actionData, toolUseId, { sessionId, tool, input: describeInput(input) }, 300);
+    }
+    if (!this.isOpen(toolUseId)) return;
+    const data = this.actionData.get(toolUseId) ?? { sessionId, tool, input: describeInput(input) };
+    data.output = output;
+    remember(this.actionData, toolUseId, data, 300);
+    this.interpreter?.enqueue({ toolUseId, tool: data.tool, input: data.input, output });
+  }
+
+  /** The Interpreter read an action: put what's evidenced and in scope on the map, and settle the action. */
+  private applyInterpretation(r: Interpretation) {
+    const action = this.state.actions[r.toolUseId];
+    if (!action || !isUnsettled(action)) return;
+    const data = this.actionData.get(r.toolUseId);
+    const sessionId = data?.sessionId ?? action.sessionId;
+    const { events, added, outOfScope } = inferEntries(this.state, r.targets, { sessionId, source: "interpreter", fromNodeId: action.nodeId });
+    for (const e of events) this.publish(e);
+    this.commit({
+      ts: Date.now(),
+      sessionId,
+      source: "interpreter",
+      type: "action.resolve",
+      toolUseId: r.toolUseId,
+      resolution: added ? "interpreted" : "nothing",
+      note: r.summary || undefined,
+      added,
+      ignored: r.rejected + outOfScope,
+    });
+    this.actionData.delete(r.toolUseId);
+  }
+
+  /** The operator settles an unread action (or all of them) by hand. */
+  resolveActions(toolUseId: unknown, all: unknown, note: unknown): number {
+    const ids = all === true ? Object.keys(this.state.actions).filter((id) => this.isOpen(id)) : typeof toolUseId === "string" && this.isOpen(toolUseId) ? [toolUseId] : [];
+    for (const id of ids) {
+      this.commit({
+        ts: Date.now(),
+        sessionId: this.state.actions[id].sessionId,
+        source: "operator",
+        type: "action.resolve",
+        toolUseId: id,
+        resolution: "dismissed",
+        note: typeof note === "string" && note.trim() ? note.trim().slice(0, 500) : undefined,
+      });
+      this.actionData.delete(id);
+    }
+    return ids.length;
+  }
+
+  /** (Re)starts the Interpreter from the current settings: it runs only when a mode is chosen and a key is available. */
+  private configureInterpreter() {
+    this.interpreter?.stop();
+    this.interpreter = undefined;
+    const s = this.settings.get();
+    if (!s.interpreter.mode || !(s.navigator.apiKey || process.env.ANTHROPIC_API_KEY)) return;
+    this.interpreter = new Interpreter({
+      apiKey: s.navigator.apiKey,
+      model: s.navigator.model ?? process.env.SPECTRA_VALIDATOR_MODEL,
+      log: (msg) => console.log(`[interpreter] ${msg}`),
+      onResult: (r) => this.applyInterpretation(r),
+      onGiveUp: (toolUseId, why) => {
+        const action = this.state.actions[toolUseId];
+        if (!action || action.resolution) return;
+        // Its output stays in hand, so it's read again if the Interpreter is restarted.
+        this.commit({ ts: Date.now(), sessionId: action.sessionId, source: "interpreter", type: "action.resolve", toolUseId, resolution: "failed", note: why });
+      },
+    });
+    // Anything already waiting with its output in hand.
+    for (const [toolUseId, d] of this.actionData) {
+      if (d.output && this.isOpen(toolUseId)) this.interpreter.enqueue({ toolUseId, tool: d.tool, input: d.input, output: d.output });
     }
   }
 
@@ -599,9 +742,11 @@ export class Hub {
             const origin = Array.isArray(body?.paths) ? "config" : (current?.origin ?? "session");
             this.setScope(makeScope({ paths, hosts }, origin), "operator");
           } else if (url.pathname === "/settings") {
-            return json(this.updateSettings(body?.navigator ?? {}));
+            return json(this.updateSettings(body?.navigator ?? {}, body?.interpreter?.mode));
           } else if (url.pathname === "/navigator/test") {
             return void this.testNavigator().then(json);
+          } else if (url.pathname === "/actions/resolve") {
+            return json({ resolved: this.resolveActions(body?.toolUseId, body?.all, body?.note) });
           } else if (url.pathname === "/engagement/new") {
             this.newEngagement();
           } else if (url.pathname === "/triage") {
@@ -645,6 +790,20 @@ function readBody(req: http.IncomingMessage): Promise<any> {
       }
     });
   });
+}
+
+/** A bounded map: the oldest entry makes room for a new one. */
+function remember<V>(map: Map<string, V>, key: string, value: V, limit: number) {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > limit) map.delete(map.keys().next().value as string);
+}
+
+/** A tool call's input as text for a reader: the command for Bash, compact JSON otherwise. */
+function describeInput(input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>;
+  const text = typeof i.command === "string" ? i.command : JSON.stringify(i);
+  return text.slice(0, 4000);
 }
 
 /** Hooks without tool_use_id: Pre and Post for the same call hash identically. */

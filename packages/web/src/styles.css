@@ -564,6 +564,30 @@ button.ghost.danger { border-color: var(--alert); color: var(--alert); }
 .src.agent { color: var(--accent); }
 .src.proxy { color: #b98cf0; }
 .src.both { color: var(--complete); }
+.src.output { color: var(--muted); border-style: dashed; }
+
+/* Actions the hub couldn't read */
+.actions-view { overflow-y: auto; flex: 1; padding: 8px 12px; }
+.actions-tally { margin: 0 0 8px; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.actions-tally button { margin-left: auto; }
+.actions { list-style: none; margin: 0; padding: 0; }
+.actions li { padding: 8px 0; border-top: 1px solid var(--line); }
+.actions li p { margin: 3px 0 0; }
+.action-head { display: flex; align-items: center; gap: 8px; }
+.action-head time { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.action-head button { margin-left: auto; }
+.action-state { font-family: var(--cond); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; padding: 0 5px; border: 1px solid currentColor; border-radius: 2px; color: var(--muted); }
+.action-state.open { color: var(--alert); }
+.action-state.interpreted { color: var(--complete); }
+.action-state.failed { color: var(--accent); }
+.action-cmd { font-family: var(--mono); font-size: 11.5px; color: var(--text-hi); cursor: pointer; overflow-wrap: anywhere; }
+.action-cmd:hover { color: var(--accent); }
+.action-cmd b { color: var(--accent); font-weight: 500; }
+button.ghost.mini { padding: 1px 7px; font-size: 10px; }
+button.link-meta { background: none; border: 0; padding: 0; font: inherit; color: var(--alert); cursor: pointer; }
+.unread-tag { font-family: var(--cond); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; padding: 0 4px; margin-right: 6px; border: 1px dashed currentColor; border-radius: 2px; color: var(--muted); }
+.unread-tag.open { color: var(--alert); }
+.unread-tag.interpreted { color: var(--complete); }
 
 /* ── Shared filter bar (Graph and Surface) ── */
 .filter-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }

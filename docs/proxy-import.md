@@ -73,7 +73,7 @@ Each imported target gets these properties, visible in the [Target](dashboard.md
 
 | Property | Meaning |
 |---|---|
-| **seen in** | *proxy traffic* if it was new when imported; *agent and proxy traffic* if it was already on the map. The Surface **Source** column shows these as *proxy* and *both*. |
+| **seen in** | *proxy traffic* if it was new when imported, or if it had only been [found in a command's output](interpreter.md#the-local-url-scan) until then; *agent and proxy traffic* if it was otherwise already on the map. The Surface **Source** column shows these as *proxy* and *both*. |
 | **requests** | How many requests in the history hit it. Domains and hosts count every request beneath them. |
 | **methods** | The HTTP methods seen, such as `GET, POST`. |
 | **status codes** | The response codes seen, such as `200, 403`. |

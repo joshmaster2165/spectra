@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { SEVERITY_RANK, type Assessment, type Finding, type FindingAssessment, type GraphState, type Review } from "@spectra/schema";
+import { useContext, useState } from "react";
+import { SEVERITY_RANK, isUnsettled, type ActionResolution, type Assessment, type Finding, type FindingAssessment, type GraphState, type OpaqueAction, type Review } from "@spectra/schema";
 import { Segmented } from "../components/Panel.tsx";
 import { Confidence } from "../components/Status.tsx";
+import { ReadOnly } from "../filters.ts";
 import { clock, formatTool } from "../format.ts";
 
-export type OversightTab = "findings" | "navigator" | "scope";
+export type OversightTab = "findings" | "navigator" | "actions" | "scope";
 
 const VERDICT_LABEL: Record<Review["verdict"], string> = { verified: "Verified", rejected: "Rejected", "needs-info": "Needs info" };
 const NAV_VERDICT_LABEL: Record<FindingAssessment["verdict"], string> = { corroborated: "Corroborated", unconvinced: "Unconvinced", "needs-evidence": "Needs evidence" };
@@ -25,6 +26,7 @@ export function Oversight({
 }) {
   const findings = Object.values(state.findings);
   const leadCount = Object.keys(state.assessments).length;
+  const openActions = Object.values(state.actions ?? {}).filter(isUnsettled).length;
   return (
     <div className="ledger-body">
       <Segmented
@@ -33,9 +35,11 @@ export function Oversight({
         options={[
           { value: "findings", label: `Findings ${findings.length || ""}`.trim() },
           { value: "navigator", label: `Navigator ${leadCount || ""}`.trim() },
+          { value: "actions", label: `Actions ${openActions ? `· ${openActions}` : ""}`.trim() },
           { value: "scope", label: `Scope ${state.violations.length ? `· ${state.violations.length}` : ""}`.trim() },
         ]}
       />
+      {tab === "actions" && <Actions state={state} onSelect={onSelect} />}
       {tab === "findings" && <Findings state={state} onSelect={onSelect} />}
       {tab === "navigator" && <Navigator state={state} onSelect={onSelect} />}
       {tab === "scope" && <ScopeView state={state} onSelect={onSelect} />}
@@ -203,6 +207,78 @@ function ReviewForm({ finding }: { finding: Finding }) {
         {finding.review && <span className="muted">Saved {clock(finding.review.ts)}</span>}
         {error && <span className="alert-text">{error}</span>}
       </div>
+    </div>
+  );
+}
+
+const RESOLUTION_LABEL: Record<ActionResolution, string> = { interpreted: "Interpreted", nothing: "Nothing to map", dismissed: "Dismissed", failed: "Couldn't read" };
+
+/**
+ * The reconciliation: every tool call is recorded, and these are the ones the
+ * hub couldn't read on its own — open until the Interpreter or you settle them.
+ */
+function Actions({ state, onSelect }: { state: GraphState; onSelect: (id: string) => void }) {
+  const readOnly = useContext(ReadOnly);
+  const [error, setError] = useState(false);
+  const all = Object.values(state.actions ?? {});
+  const open = all.filter(isUnsettled).sort((a, b) => b.ts - a.ts);
+  const settled = all.filter((a) => !isUnsettled(a)).sort((a, b) => (b.resolvedTs ?? b.ts) - (a.resolvedTs ?? a.ts));
+  const total = state.counts.toolCalls;
+  const resolve = async (body: { toolUseId?: string; all?: boolean }) => {
+    const res = await fetch("/actions/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
+    setError(!res?.ok);
+  };
+  const row = (a: OpaqueAction) => (
+    <li key={a.toolUseId} className={a.resolution ?? "open"}>
+      <div className="action-head">
+        <time>{clock(a.ts)}</time>
+        <span className={`action-state ${a.resolution ?? "open"}`}>{a.resolution ? RESOLUTION_LABEL[a.resolution] : "Not read"}</span>
+        {a.resolution === "interpreted" && <span className="muted">+{a.added} on the map</span>}
+        {!!a.ignored && (
+          <span className="muted" title="Candidates left off the map: out of scope, or not shown by the command or its output">
+            {a.ignored} left out
+          </span>
+        )}
+        {isUnsettled(a) && !readOnly && (
+          <button className="ghost mini" onClick={() => resolve({ toolUseId: a.toolUseId })} title="Nothing here needs mapping">
+            Dismiss
+          </button>
+        )}
+      </div>
+      <p className="action-cmd" onClick={() => a.nodeId && onSelect(a.nodeId)} title="Open this action">
+        <b>{formatTool(a.tool)}</b> {a.summary.slice(a.tool.length).trim()}
+      </p>
+      <p className="muted">
+        {a.reason}.{a.note ? ` ${a.resolvedBy === "operator" ? "You" : "Interpreter"}: ${a.note}` : ""}
+        {a.resolution === "failed" && " It will be read again if the Interpreter restarts, or you can dismiss it."}
+      </p>
+    </li>
+  );
+  return (
+    <div className="actions-view">
+      <p className="actions-tally">
+        <b>{total - open.length}</b> of <b>{total}</b> actions accounted for
+        {open.length ? (
+          <span className="alert-text"> · {open.length} not read</span>
+        ) : all.length ? (
+          <span className="muted"> · {all.length} needed a second look</span>
+        ) : null}
+        {open.length > 1 && !readOnly && (
+          <button className="ghost mini" onClick={() => resolve({ all: true })}>
+            Dismiss all
+          </button>
+        )}
+      </p>
+      {error && <p className="alert-text">Couldn't reach the hub.</p>}
+      {!all.length && (
+        <p className="muted">
+          Spectra could read every action so far. Scripts, scanners and commands built from variables are listed here until the Interpreter (in <strong>Settings</strong>) or you settle them.
+        </p>
+      )}
+      <ul className="actions">
+        {open.map(row)}
+        {settled.map(row)}
+      </ul>
     </div>
   );
 }

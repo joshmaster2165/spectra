@@ -1,6 +1,6 @@
 # Configuration
 
-Spectra is configured with one optional file, `spectra.config.json`, which holds the scope; a settings file the hub writes when you change the Navigator's settings in the dashboard; and a set of environment variables. This page describes both files and lists every variable the code reads, which process reads it, and its default. The hub reads the config file and its environment once at startup, so restart `npm start` after changing them; client processes (the hook, MCP server, a separately run Navigator, importer and demos) read theirs each time they start.
+Spectra is configured with one optional file, `spectra.config.json`, which holds the scope; a settings file the hub writes when you change the Navigator's or the Interpreter's settings in the dashboard; and a set of environment variables. This page describes both files and lists every variable the code reads, which process reads it, and its default. The hub reads the config file and its environment once at startup, so restart `npm start` after changing them; client processes (the hook, MCP server, a separately run Navigator, importer and demos) read theirs each time they start.
 
 ## The config file
 
@@ -28,7 +28,7 @@ Other keys in the file are ignored.
 
 ## The settings file
 
-The dashboard's [Settings](dashboard.md#settings) dialog saves the Navigator's settings to a second file, which the hub writes and reads itself:
+The dashboard's [Settings](dashboard.md#settings) dialog saves the Navigator's and the Interpreter's settings to a second file, which the hub writes and reads itself:
 
 ```json
 {
@@ -36,6 +36,9 @@ The dashboard's [Settings](dashboard.md#settings) dialog saves the Navigator's s
     "apiKey": "sk-ant-...",
     "model": "claude-opus-5-5",
     "enabled": true
+  },
+  "interpreter": {
+    "mode": "unread"
   }
 }
 ```
@@ -45,11 +48,12 @@ The dashboard's [Settings](dashboard.md#settings) dialog saves the Navigator's s
 | `navigator.apiKey` | The Anthropic API key for the Navigator in the hub. When absent, the hub falls back to `ANTHROPIC_API_KEY` in its environment. |
 | `navigator.model` | The model id. When absent: `SPECTRA_VALIDATOR_MODEL` in the hub's environment, then `claude-opus-5-5`. |
 | `navigator.enabled` | Whether the hub runs the Navigator. It only runs when this is `true` and a key is available. |
+| `interpreter.mode` | What the [Interpreter](interpreter.md) reads: `unread` (actions Spectra can't read) or `all` (those, and any output that lists paths). Off is stored as no mode at all — an empty `interpreter` object. It only runs when a mode is set and a key is available, and it uses `navigator.apiKey` and `navigator.model`. |
 
 - **Location.** `~/.spectra/settings.json`. `SPECTRA_SETTINGS` points the hub at another file.
 - **Permissions.** The file holds a secret, so the hub writes it owner-only (mode `600`) and resets that mode on every save; it creates the directory, if needed, as `700`.
-- **When it's read and written.** Read once, when the hub starts — so a Navigator you turned on starts again with the hub. Written each time you save a key, change the model, or turn the Navigator on or off. A setting you clear is removed from the file.
-- **Errors.** A missing or unreadable file is ignored: the hub starts with the Navigator off and no saved key.
+- **When it's read and written.** Read once, when the hub starts — so a Navigator or Interpreter you turned on starts again with the hub. Written each time you save a key, change the model, turn the Navigator on or off, or change what the Interpreter reads. A setting you clear is removed from the file.
+- **Errors.** A missing or unreadable file is ignored: the hub starts with the Navigator and the Interpreter off and no saved key. An `interpreter.mode` other than `unread` or `all` is read as off.
 - **Not affected by `SPECTRA_PERSIST`.** `SPECTRA_PERSIST=0` turns off the audit log, not this file.
 - **What isn't in it.** The scope you edit in Settings isn't saved here; it's kept with the engagement, in the audit log. Keep a permanent scope in `spectra.config.json`.
 
@@ -72,18 +76,19 @@ Change it through the dashboard, or [`POST /settings`](reference.md#post-setting
 | `SPECTRA_PROJECTS_DIR` | `~/.claude/projects` | Where the log observer looks for Claude Code transcripts. |
 | `SPECTRA_REPLAY` | | `1` makes the log observer read existing Claude Code transcripts from the beginning — including old sessions — instead of only new activity. It doesn't load Spectra's own audit logs; use [Replay](dashboard.md#replay) for those. |
 | `SPECTRA_NOTIFY` | | `0` turns desktop alerts for scope violations off. |
-| `SPECTRA_SETTINGS` | `~/.spectra/settings.json` | Path to the [settings file](#the-settings-file), where the Navigator's key, model and on/off setting are kept. |
-| `ANTHROPIC_API_KEY` | | Used by the Navigator in the hub when no key is saved in Settings. A saved key takes its place. |
-| `SPECTRA_VALIDATOR_MODEL` | `claude-opus-5-5` | The Navigator's model when none is saved in Settings. |
+| `SPECTRA_SETTINGS` | `~/.spectra/settings.json` | Path to the [settings file](#the-settings-file), where the Navigator's key, model and on/off setting and the Interpreter's mode are kept. |
+| `ANTHROPIC_API_KEY` | | Used by the Navigator in the hub, and by the Interpreter, when no key is saved in Settings. A saved key takes its place. |
+| `SPECTRA_VALIDATOR_MODEL` | `claude-opus-5-5` | The Navigator's model — and so the Interpreter's — when none is saved in Settings. |
 | `SPECTRA_VALIDATOR_IDLE_MS` | `2500` | How long the map must be quiet, in milliseconds, before the Navigator in the hub assesses it. |
 
-The last three only matter when the Navigator runs in the hub. A Navigator started with `npm run validator` reads its own environment — see [Clients](#clients).
+The last three only matter when the Navigator or the Interpreter runs in the hub; `SPECTRA_VALIDATOR_IDLE_MS` affects the Navigator alone. A Navigator started with `npm run validator` reads its own environment — see [Clients](#clients). There's no environment variable that turns the Interpreter on: its mode comes from the settings file.
 
 ### Clients
 
 | Variable | Default | Read by | Effect |
 |---|---|---|---|
 | `SPECTRA_HUB` | `http://127.0.0.1:4317` | Hook, MCP server, `npm run validator`, importer, demos | The hub's base URL. Set it whenever you change `SPECTRA_PORT`. Use `127.0.0.1`, not `localhost`: the hub only listens on IPv4 loopback. |
+| `SPECTRA_HOOK_OUTPUT` | | Hook | `0` stops the hook forwarding tool output to the hub. Unread actions are still listed, but nothing can read them: no local URL scan and no Interpreter. See [Interpreter → Tool output](interpreter.md#tool-output). |
 | `SPECTRA_SESSION` | `mcp` | MCP server | The session id the MCP server sends. With the default, the hub attaches annotations to the live Claude Code session; any other value records them under that id. |
 | `ANTHROPIC_API_KEY` | | `npm run validator` | API key for the Navigator's model calls. Read by the Anthropic SDK. |
 | `SPECTRA_VALIDATOR_MODEL` | `claude-opus-5-5` | `npm run validator` | Model id. |
@@ -91,7 +96,7 @@ The last three only matter when the Navigator runs in the hub. A Navigator start
 | `SPECTRA_DEMO_PACE` | `1` | `npm run demo:recon` | Multiplies the recon demo's pauses. Below 1 is faster. |
 | `SPECTRA_DEMO_PHASES` | `all` | `npm run demo:recon` | `map` runs the engagement without the Navigator's leads; `navigator` posts only the leads and verdicts, for a map that's already there. |
 
-The hook runs inside Claude Code, so it sees Claude Code's environment: set `SPECTRA_HUB` in the shell you start Claude Code from. The MCP server is started by Claude Code too; give it variables when you register it, for example `claude mcp add spectra -e SPECTRA_HUB=http://127.0.0.1:4400 -- "$(pwd)/node_modules/.bin/tsx" "$(pwd)/packages/server/src/mcp.ts"`.
+The hook runs inside Claude Code, so it sees Claude Code's environment: set `SPECTRA_HUB` and `SPECTRA_HOOK_OUTPUT` in the shell you start Claude Code from. The MCP server is started by Claude Code too; give it variables when you register it, for example `claude mcp add spectra -e SPECTRA_HUB=http://127.0.0.1:4400 -- "$(pwd)/node_modules/.bin/tsx" "$(pwd)/packages/server/src/mcp.ts"`.
 
 `npm run verify` also reads `SPECTRA_DATA_DIR`, so set it the same way as for the hub.
 
@@ -112,6 +117,15 @@ These aren't configurable, but they're useful to know:
 | Settings dialog refresh (Navigator status, setup checklist) | Every 3 seconds |
 | Triage note | 2,000 characters |
 | Navigator | At most one assessment every 15 seconds; 200 targets per digest (attack surface first); 4,000 output tokens |
+| Tool output forwarded by the hook | `Bash`, `BashOutput`, `WebFetch` and non-Spectra MCP tools only; the first 8,000 and last 4,000 characters of anything over 12,000 |
+| Tool output read by the hub | 20,000 characters per call |
+| Tool output held for unread actions | In memory only, for at most 300 actions |
+| Local URL scan | 150 distinct URLs per output; 20 parameter names per endpoint |
+| Interpreter, per request | Up to 5 actions; at least 4 seconds between requests; 4,000 output tokens |
+| Interpreter, per action | 3,000 characters of the command and 6,000 of its output sent; at most 60 targets and 20 parameter names per target accepted; 3 attempts, 30 seconds apart, before it's settled as *Couldn't read* |
+| Interpreter queue | 200 actions |
+| Note on a dismissed action | 500 characters |
+| Unread commands listed in a report | 40 |
 
 ## Development
 

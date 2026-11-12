@@ -1,3 +1,4 @@
+import { isUnsettled } from "@spectra/schema";
 import { useEffect, useMemo, useState } from "react";
 import { useSpectra } from "./useSpectra.ts";
 import { useReplay } from "./useReplay.ts";
@@ -50,6 +51,7 @@ export function App() {
   const nodeCount = Object.keys(state.nodes).length;
   const edgeCount = Object.keys(state.edges).length;
   const violations = state.violations.length;
+  const unread = Object.values(state.actions ?? {}).filter(isUnsettled).length;
   const last = state.timeline.at(-1);
 
   // Unseen violations show in the browser tab title.
@@ -124,7 +126,23 @@ export function App() {
           <ActivityLedger state={state} onSelect={open} />
         </Panel>
 
-        <Panel area="findings" title="Oversight" meta={violations ? <span className="alert-text">{violations} violations</span> : "in scope"}>
+        <Panel
+          area="findings"
+          title="Oversight"
+          meta={
+            <>
+              {violations ? <span className="alert-text">{violations} violation{violations === 1 ? "" : "s"}</span> : "in scope"}
+              {unread > 0 && (
+                <>
+                  <span className="muted"> · </span>
+                  <button className="link-meta" onClick={() => setOversightTab("actions")} title="Actions Spectra couldn't read">
+                    {unread} not read
+                  </button>
+                </>
+              )}
+            </>
+          }
+        >
           <Oversight state={state} tab={oversightTab} onTab={setOversightTab} onSelect={open} />
         </Panel>
 

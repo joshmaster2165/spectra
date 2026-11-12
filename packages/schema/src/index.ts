@@ -20,7 +20,42 @@ export type Importance = 1 | 2 | 3 | 4 | 5;
  * traffic imported from proxy history (what crossed the wire, not what the
  * agent did); validator is the Navigator's advice.
  */
-export type EventSource = "hook" | "observer" | "mcp" | "demo" | "hub" | "operator" | "validator" | "proxy";
+export type EventSource = "hook" | "observer" | "mcp" | "demo" | "hub" | "operator" | "validator" | "proxy" | "interpreter";
+
+/**
+ * How an action the hub couldn't read was settled: a model read its output and
+ * found targets ("interpreted") or none ("nothing"), the operator waved it
+ * through ("dismissed"), or interpretation was tried and gave up ("failed").
+ */
+export type ActionResolution = "interpreted" | "nothing" | "dismissed" | "failed";
+
+/** Still unaccounted for: never settled, or a read was tried and gave up. */
+export const isUnsettled = (a: OpaqueAction) => !a.resolution || a.resolution === "failed";
+
+/**
+ * A tool call the hub recorded but couldn't fully read — a script, a scanner
+ * whose results are in its output, a URL built from a variable. Open until
+ * something resolves it, so nothing the agent did goes silently unmapped.
+ */
+export interface OpaqueAction {
+  toolUseId: string;
+  sessionId: string;
+  ts: number;
+  tool: string;
+  /** The command or call, as shown in Activity. */
+  summary: string;
+  nodeId?: string;
+  /** Why the hub couldn't read it. */
+  reason: string;
+  resolution?: ActionResolution;
+  resolvedBy?: EventSource;
+  resolvedTs?: number;
+  /** One line from whoever resolved it: what the action did. */
+  note?: string;
+  /** Targets the resolution put on the map, and candidates it left off (out of scope or not evidenced). */
+  added?: number;
+  ignored?: number;
+}
 
 export interface MapNode {
   id: string;
@@ -382,13 +417,15 @@ export type SpectraEvent =
   | (Base & { type: "finding.review"; findingId: string; review: Review })
   | (Base & { type: "finding.edit"; findingId: string; edit: FixEdit })
   | (Base & { type: "target.triage"; nodeId: string; triage: Triage | null })
+  | (Base & { type: "action.open"; action: Pick<OpaqueAction, "toolUseId" | "tool" | "summary" | "nodeId" | "reason"> })
+  | (Base & { type: "action.resolve"; toolUseId: string; resolution: ActionResolution; note?: string; added?: number; ignored?: number })
   | (Base & { type: "assessment.upsert"; assessment: Assessment })
   | (Base & { type: "finding.assessment"; findingId: string; assessment: FindingAssessment });
 
 export type SpectraEventType = SpectraEvent["type"];
 
 /** Event types only the hub itself may produce; rejected from POST /events. */
-export const HUB_ONLY_EVENTS: SpectraEventType[] = ["scope.set", "scope.violation", "finding.review", "finding.edit", "target.triage"];
+export const HUB_ONLY_EVENTS: SpectraEventType[] = ["scope.set", "scope.violation", "finding.review", "finding.edit", "target.triage", "action.open", "action.resolve"];
 
 /** Only the Navigator (via the hub's /validator endpoint) may produce these; rejected from POST /events. */
 export const VALIDATOR_ONLY_EVENTS: SpectraEventType[] = ["assessment.upsert", "finding.assessment"];
@@ -407,6 +444,8 @@ export interface GraphState {
   violations: ScopeViolation[];
   /** Absolute path → how the agent touched it */
   files: Record<string, FileTouch>;
+  /** Tool calls the hub couldn't fully read, keyed by tool-use id; open until resolved. */
+  actions: Record<string, OpaqueAction>;
   /** Running totals; the timeline itself is capped. */
   counts: { toolCalls: number; failed: number; firstTs?: number; lastTs?: number };
   /** Most recent last; capped by the reducer. */
@@ -429,8 +468,11 @@ export const TIMELINE_LIMIT = 500;
 export const SEVERITY_RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
 export function emptyState(): GraphState {
-  return { nodes: {}, edges: {}, chain: {}, findings: {}, assessments: {}, triage: {}, violations: [], files: {}, counts: { toolCalls: 0, failed: 0 }, timeline: [] };
+  return { nodes: {}, edges: {}, chain: {}, findings: {}, assessments: {}, triage: {}, actions: {}, violations: [], files: {}, counts: { toolCalls: 0, failed: 0 }, timeline: [] };
 }
+
+/** The "seen in" value of surface found in a command's output rather than in a request the hub saw. */
+export const OUTPUT_SEEN_IN = "command output";
 
 /** Pure reducer shared by the hub, the live dashboard and replay. */
 export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
@@ -454,6 +496,11 @@ export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
       const node = { ...prev, ...e.node };
       // Merge properties rather than replace them, so traffic stats survive agent updates.
       if (prev?.meta && e.node.meta) node.meta = { ...prev.meta, ...e.node.meta };
+      // Surface first read out of command output that the agent now requests itself is plain agent traffic.
+      if (prev && node.meta?.["seen in"] === OUTPUT_SEEN_IN && (e.source === "hook" || e.source === "observer")) {
+        const { "seen in": _seen, "read by": _reader, ...rest } = node.meta;
+        node.meta = rest;
+      }
       // Surface first seen in proxy traffic that the agent now touches is seen in both.
       if (prev && node.meta?.["seen in"] === "proxy traffic" && e.source !== "proxy") {
         node.meta = { ...node.meta, "seen in": "agent and proxy traffic" };
@@ -502,6 +549,22 @@ export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
     case "finding.edit": {
       const f = state.findings[e.findingId];
       if (f) next.findings = { ...state.findings, [f.id]: { ...f, edits: [...(f.edits ?? []), e.edit] } };
+      break;
+    }
+    case "action.open":
+      // The first reason stands; a resolved action isn't reopened.
+      if (!state.actions?.[e.action.toolUseId]) {
+        next.actions = { ...state.actions, [e.action.toolUseId]: { ...e.action, sessionId: e.sessionId, ts: e.ts } };
+      }
+      break;
+    case "action.resolve": {
+      const a = state.actions?.[e.toolUseId];
+      if (a) {
+        next.actions = {
+          ...state.actions,
+          [a.toolUseId]: { ...a, resolution: e.resolution, resolvedBy: e.source, resolvedTs: e.ts, note: e.note ?? a.note, added: e.added, ignored: e.ignored },
+        };
+      }
       break;
     }
     case "target.triage": {

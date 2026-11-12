@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { GraphState, MapNode } from "@spectra/schema";
+import { isUnsettled, type GraphState, type MapNode } from "@spectra/schema";
 import { Segmented } from "../components/Panel.tsx";
 import { ImportanceBars } from "../components/Status.tsx";
 import { clock, formatTool } from "../format.ts";
@@ -43,6 +43,11 @@ function ThoughtStream({ state, onSelect }: { state: GraphState; onSelect: (id: 
           ) : e.type === "tool.call" ? (
             <p className="tool" onClick={() => e.nodeId && onSelect(e.nodeId)}>
               {flagged.has(e.toolUseId) && <span className="oob-tag">out of scope</span>}
+              {state.actions?.[e.toolUseId] && (
+                <span className={`unread-tag ${isUnsettled(state.actions[e.toolUseId]) ? "open" : state.actions[e.toolUseId].resolution}`} title={state.actions[e.toolUseId].reason}>
+                  {state.actions[e.toolUseId].resolution === "interpreted" ? "interpreted" : isUnsettled(state.actions[e.toolUseId]) ? "not read" : "settled"}
+                </span>
+              )}
               <b>{formatTool(e.tool)}</b>
               <span>{e.summary.slice(e.tool.length).trim()}</span>
             </p>

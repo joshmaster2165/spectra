@@ -10,7 +10,7 @@ The dashboard at **http://127.0.0.1:4317** is a live view of the hub's state: on
 |---|---|---|
 | Left, full height | **Attack Surface** — Graph, Tree, Surface, Files, Target | *N targets · M links* |
 | Top right | **Activity** — Stream, Objects | *N events* (the most recent 500 are kept on screen) |
-| Middle right | **Oversight** — Findings, Navigator, Scope | *in scope*, or *N violations* in red |
+| Middle right | **Oversight** — Findings, Navigator, Actions, Scope | *in scope*, or *N violations* in red; then *· N not read* while any [action](#actions) is unread (click it to open the tab) |
 | Bottom left | **Chain** | *N steps* |
 | Bottom right | **Coverage** | |
 
@@ -24,7 +24,7 @@ Selecting a target is shared across the panels: select it in one view and it sta
 | **Scope badge** | *N paths · M hosts*, or *unset* before any scope exists. A red *N out of scope* pill appears with the first violation. Click it to open **Oversight → Scope**. |
 | **Import HAR** | Import proxy history from a HAR file. Parsing happens in the browser; only names reach the hub. A status pill reports the result (hover for the full summary, click to dismiss). Hidden during replay. See [Proxy import](proxy-import.md). |
 | **Report** | Download a Markdown report of what's on screen. See [Report](#report). |
-| **Settings** | Open the Settings dialog: the Navigator's key and model, the scope, and a setup checklist. See [Settings](#settings). |
+| **Settings** | Open the Settings dialog: the Navigator's key and model, the Interpreter, the scope, the engagement, and a setup checklist. See [Settings](#settings). |
 | **Replay** | Switch to replaying a recorded session. See [Replay](#replay). |
 | **Live / Offline** | Whether the dashboard's WebSocket to the hub is connected. It reconnects every second while offline. Shows **Replay** instead during replay. |
 | Clock | The current time in UTC. |
@@ -37,7 +37,7 @@ Every target has a **status**, shown as the colour of its outline and icon:
 
 | Colour | Status | Meaning |
 |---|---|---|
-| Grey | `unexplored` — shown as **unmapped** throughout the dashboard | Known but not touched: seen only in proxy history, mapped by the agent but not yet probed, or a tool call on it failed. |
+| Grey | `unexplored` — shown as **unmapped** throughout the dashboard | Known but not touched: seen only in proxy history, found in a command's output, mapped by the agent but not yet probed, or a tool call on it failed. |
 | Orange (leaves pulse) | `active` | Being worked on: a tool call touched it and hasn't returned yet, or the agent mapped it as active. |
 | Green | `complete` — shown as **confirmed** throughout the dashboard | The tool call that touched it returned successfully, or the agent marked it complete. It's not a security verdict. |
 | Blue | Session root | One per Claude Code session (or demo, or proxy import). |
@@ -111,7 +111,7 @@ The controls combine: a target must pass all of them. The filter lasts until you
 
 The panel has five views, in this order: **Graph, Tree, Surface, Files, Target**.
 
-The map has two kinds of structure. Each session has a root with a category per kind of tool — `files`, `searches`, `commands`, `web`, `agents`, `mcp`, `other` — holding one leaf per thing the agent touched. Network targets also build an attack-surface tree under `hosts`: **domain → subdomain → endpoint → parameter**. Numeric ids, UUIDs and long hex strings in URL paths collapse to `:id`, and token-like segments to `:token`, so `/api/users/42/orders` and `/api/users/97/orders` are one endpoint, `/api/users/:id/orders`. A labelled *request* edge links each tool call to the host or endpoint it hit.
+The map has two kinds of structure. Each session has a root with a category per kind of tool — `files`, `searches`, `commands`, `web`, `agents`, `mcp`, `other` — holding one leaf per thing the agent touched. Network targets also build an attack-surface tree under `hosts`: **domain → subdomain → endpoint → parameter**. Numeric ids, UUIDs and long hex strings in URL paths collapse to `:id`, and token-like segments to `:token`, so `/api/users/42/orders` and `/api/users/97/orders` are one endpoint, `/api/users/:id/orders`. A labelled *request* edge links each tool call to the host or endpoint it hit, and a *found* edge links a command to each target that was read out of its output (see [Interpreter](interpreter.md)). A fuzzer's placeholder isn't an endpoint: for a URL containing `FUZZ` (or `FUZ2Z` and the like), the URL up to the placeholder is mapped.
 
 ### Graph
 
@@ -202,7 +202,7 @@ What the columns mean:
 | `#` | The order the target first appeared on the map. |
 | **Tags** | The target's automatic [tags](#tags). |
 | **Status** | *unmapped*, *active* or *confirmed* — see [Reading the map](#reading-the-map). |
-| **Source** | **agent** — touched or reported by the agent (hooks, observer or MCP); **proxy** — seen only in imported proxy history; **both** — the agent touched it and the proxy saw it. |
+| **Source** | **agent** — touched or reported by the agent (hooks, observer or MCP); **proxy** — seen only in imported proxy history; **both** — the agent touched it and the proxy saw it; **output** (a dashed chip) — found in a command's output by the local URL scan or the [Interpreter](interpreter.md), not in a request Spectra saw. An **output** target becomes **agent** when the agent requests it, and **proxy** when an import sees it. |
 | **Params** / **Endpoints** | How many parameters sit under the endpoint, or endpoints under the host. |
 | **Requests** | How many requests the imported proxy history had for it. |
 | **Lead** | The Navigator's recommendation (*pursue*, *watch* or *skip*) and confidence. Hover for its rationale. |
@@ -237,11 +237,11 @@ One target in detail. It shows the selected target, or the first session root if
 
 - **Header**: its kind, label, status, an *out of scope* tag if it went out of scope, and its [tags](#tags).
 - **Ego graph**: the target in the middle with up to 16 neighbours around it (*+N* for the rest). Click a neighbour to move to it.
-- **Properties**: id, kind, category, parent (click to move to it), importance, and anything else recorded about it — for example the tool and key for a tool-call leaf, the host and an example URL for an endpoint, or *seen in*, *requests*, *methods* and *status codes* from proxy history.
+- **Properties**: id, kind, category, parent (click to move to it), importance, and anything else recorded about it — for example the tool and key for a tool-call leaf, the host and an example URL for an endpoint, *seen in*, *requests*, *methods* and *status codes* from proxy history, or *seen in: command output*, *read by* (*url scan* or *interpreter*) and the *evidence* quote for a target found in a command's output.
 - **Your triage**: buttons for **To test**, **Testing**, **Tested** and **Skip**, a note box, and **Clear** once a mark is set. The note is saved with the mark: write it, then pick a mark, or edit it on a marked target and click **Save note**. See [Triage](#triage).
 - **Navigator's lead**: when the Navigator has scored this target, its recommendation, confidence, suspected bug class and rationale.
 - **Scope violations**: time, access, target and tool for each violation on this target.
-- **Connections**: every edge in and out, with its label (*contains*, *parent*, *request*, or the agent's own label) and the other end's status.
+- **Connections**: every edge in and out, with its label (*contains*, *parent*, *request*, *found*, or the agent's own label) and the other end's status.
 - **Activity**: the last 30 tool calls on this target with their result (*OK*, *ERR*, or *…* while running), and the chain steps that reference it.
 
 ## Activity
@@ -250,6 +250,7 @@ One target in detail. It shows the selected target, or the first session root if
 
 - Reasoning comes from the log observer (the agent's thinking and replies, up to 400 characters each), from your prompts via hooks (tagged *operator prompt*), from `log_thought`, and from proxy imports (tagged *proxy import*).
 - Tool calls show the tool and its main argument. Out-of-scope calls have a red bar and an *out of scope* tag.
+- A call Spectra couldn't read carries a dashed tag: *not read* while it's open, *interpreted* once the Interpreter has put targets from it on the map, or *settled* when it was dismissed or had nothing to map. A call the Interpreter couldn't read stays *not read*. Hover the tag for the reason. See [Actions](#actions).
 - Click a tool call to open its target.
 
 **Objects** lists every leaf on the map as a card with its category and importance. Sort by **Importance**, **Category** or **Status**; click a card to open it.
@@ -279,6 +280,32 @@ Click a finding to expand it:
 
 The Navigator's leads, sorted pursue, watch, skip, then by confidence. Each shows the recommendation, a title, the confidence, the suspected bug class, the target, and a one-line rationale. Click one to open its target. Before the Navigator has posted anything, this tab says so and names `npm run validator`; turning the Navigator on in [Settings](#settings) does the same job. See [Navigator](navigator.md#reading-its-output).
 
+### Actions
+
+![The dashboard with Oversight → Actions open: the Oversight header reads 1 violation · 2 not read, the tally reads 11 of 13 actions accounted for · 2 not read with a Dismiss all button, two rows marked Not read — a script and a scanner, each with its reason and a Dismiss button — sit above a row marked Interpreted with +4 on the map and 4 left out; the Activity stream tags the same calls not read and interpreted; and the Surface table, sorted by Source, shows endpoints found in command output with a dashed output chip beside the solid proxy and agent chips](media/actions.png)
+
+Every tool call is recorded. This tab is the reconciliation: which of them Spectra couldn't read — a script, a scanner whose results are in its output, a URL built from a variable — and how each was settled. [Interpreter](interpreter.md#what-spectra-can-read-on-its-own) explains what gets flagged and why.
+
+- **The tally** reads *N of M actions accounted for*: every recorded tool call, less the ones still not read (including any the Interpreter tried and couldn't read). It's followed by *· N not read* in red while any are open, or *· N needed a second look* once all of them are settled.
+- **Rows** list the open actions first, newest first, then the settled ones. Each shows:
+  - the time and a state chip (see below);
+  - *+N on the map* — how many targets the Interpreter added from it;
+  - *N left out* — candidates the Interpreter reported that didn't reach the map: out of scope, or not shown by the command or its output;
+  - the command or tool call. Click it to open it in the **Target** view;
+  - the reason Spectra couldn't read it, then a note if there is one: *Interpreter:* and its one-line summary of what the action did, or *You:* and the note sent with a dismissal.
+- **Dismiss** settles one open action by hand: nothing in it needs mapping. **Dismiss all** appears when more than one is open. The hub records each dismissal as an operator event. The buttons send no note; [`POST /actions/resolve`](reference.md#post-actionsresolve) takes one.
+- During [replay](#replay) the tab shows the actions as they stood, without the **Dismiss** buttons.
+
+| State chip | Meaning |
+|---|---|
+| **Not read** | Open. Nothing has settled it, so whatever it touched isn't on the map. |
+| **Interpreted** | The Interpreter read its output and added targets. |
+| **Nothing to map** | The Interpreter read it and reported nothing to add. |
+| **Dismissed** | You settled it. |
+| **Couldn't read** | The Interpreter tried and gave up, or the model declined; the note says why. It still counts as not read, keeps its **Dismiss** button, and is read again if the Interpreter restarts. |
+
+With the Interpreter off, actions stay **Not read** until you dismiss them. Before any action has been flagged, the tab says that Spectra could read every action so far.
+
 ### Scope
 
 - **Set by**: *Operator config* (the config file, environment, the scope editor in [Settings](#settings) or `POST /scope`), *Session working directory*, or *Not set*.
@@ -306,7 +333,7 @@ Click **Replay** to load a recorded session from the audit log and play it back 
 | **1× 4× 16× 64×** | Playback speed (default 4×). Playback follows the recorded gaps between events, sped up, with no gap longer than 0.8 s. |
 | **Back to live** | Return to the live view. |
 
-While replaying, every panel shows the session as of the scrubber position, **Report** exports that state, and the footer verifies the replayed session's log. Triage marks are read-only during replay — the marks shown are the ones recorded in that session — and **Settings** still acts on the live hub. Replay needs the audit log, so it has nothing to show if the hub runs with `SPECTRA_PERSIST=0`.
+While replaying, every panel shows the session as of the scrubber position, **Report** exports that state, and the footer verifies the replayed session's log. Triage marks are read-only during replay — the marks shown are the ones recorded in that session — unread actions can't be dismissed, and **Settings** still acts on the live hub. Replay needs the audit log, so it has nothing to show if the hub runs with `SPECTRA_PERSIST=0`.
 
 ## Report
 
@@ -315,19 +342,20 @@ While replaying, every panel shows the session as of the scrubber position, **Re
 - the session id, time span, tool-call count (and failures) and files opened and edited;
 - the scope and who set it;
 - a summary table of findings by severity and your verdicts, and the number of violations;
-- **Attack surface**: the number of hosts, endpoints and parameters, a tally of your triage marks, and then, for each host with endpoints or a triage mark, the host's tags and mark and a table of its endpoints — tags, status, who saw it (*agent*, *proxy* or *agent + proxy*), parameters, the Navigator's lead and your triage mark and note;
+- an **Actions:** line — how many tool calls were recorded, how many Spectra couldn't read on its own, and of those how many the Interpreter read, how many you dismissed and how many are still unread — followed by the commands still not read (the first 40), each with its reason;
+- **Attack surface**: the number of hosts, endpoints and parameters, a tally of your triage marks, and then, for each host with endpoints or a triage mark, the host's tags and mark and a table of its endpoints — tags, status, who saw it (*agent*, *proxy*, *agent + proxy*, or *output (inferred)* for a target found only in a command's output), parameters, the Navigator's lead and your triage mark and note;
 - each finding with its severity, the agent's confidence and status, the Navigator's verdict (a *Navigator:* line with its confidence and rationale, when it has given one), your verdict and note, location, description, evidence trail and remediation;
 - a table of scope violations;
 - the files edited;
 - the audit log's verification result and **head hash**, with the `npm run verify` command to check it later. See [Security](security.md#the-audit-log).
 
-The report ends with a note on how far to trust each part: agent-reported findings are claims, verdicts and triage marks are yours, Navigator entries are advice, and tags are name-based heuristics.
+The report ends with a note on how far to trust each part: agent-reported findings are claims, verdicts and triage marks are yours, Navigator entries are advice, and tags are name-based heuristics. It also says that targets marked *output (inferred)* were read out of a command's output, by the URL scan or a second model, and weren't seen in a request.
 
 ## Settings
 
-![The Settings dialog: the Navigator section with a saved API key, the model, Test connection and the Run the Navigator in the hub checkbox; the Scope editor with paths and hosts; the Engagement section with the New engagement button; and the Setup checklist with a status dot for each part](media/settings.png)
+![The Settings dialog: the Navigator section with a saved API key, the model, Test connection and the Run the Navigator in the hub checkbox; the Interpreter section with its state pill, the Read menu set to Actions Spectra can't read and a line saying what goes to the Anthropic API; the Scope editor with paths and hosts; the Engagement section with the New engagement button; and the Setup checklist with a status dot for each part, the Actions row flagged because two actions are unread](media/settings.png)
 
-**Settings** in the top bar opens a dialog with four sections. Close it with **Close**, Escape, or a click outside it. It always shows the live hub, even during replay, and refreshes every 3 seconds.
+**Settings** in the top bar opens a dialog with five sections: Navigator, Interpreter, Scope, Engagement and Setup. Close it with **Close**, Escape, or a click outside it. It always shows the live hub, even during replay, and refreshes every 3 seconds.
 
 ### Navigator key and model
 
@@ -344,6 +372,17 @@ Run the [Navigator](navigator.md) inside the hub, with no second terminal.
 The line under the checkbox shows how many assessments have run, when the last one was and how much it posted, and the last error if there was one.
 
 The key is kept in `~/.spectra/settings.json`, readable only by you. If the hub was started with `ANTHROPIC_API_KEY` in its environment, Settings says so and uses that key until you save one here. See [Navigator → Running it](navigator.md#running-it) for what turning it on means, and [Security](security.md#the-navigators-api-key) for how the key is handled.
+
+### Interpreter
+
+Have a second model read the actions Spectra couldn't — see [Interpreter](interpreter.md). It uses the Navigator's API key and model from the section above, and has its own switch: it doesn't need **Run the Navigator in the hub** ticked.
+
+| Control | What it does |
+|---|---|
+| State pill | **Off**, **Running** (waiting for an unread action), **Reading…** (a model call is in flight) or **Stopped** (an error it can't recover from — the reason is shown below). |
+| **Read** | **Nothing (off)**, the default; **Actions Spectra can't read**; or **Those, and any output that lists paths**, which also reads the output of commands Spectra did understand when it lists several URL paths. Saved as soon as you choose. Disabled until a key exists. |
+
+The line under the menu says what the setting means for your data. With it off: nothing a command prints leaves the machine, and unread actions are still listed under **Oversight → Actions**. With it on: for each action it reads, the command and up to 6,000 characters of its output go to the Anthropic API, with credentials, tokens and email addresses masked first — masking is best-effort, see [Interpreter → What it sends](interpreter.md#what-it-sends). The same line shows how many actions it has read and when, how many are queued, the last error if there was one, and — while it's off — how many unread actions are *waiting with output in hand*, which turning it on will read.
 
 ### Scope editor
 
@@ -380,6 +419,7 @@ A checklist of what's connected, from the hub's `GET /health`. Each row has a st
 | **Claude Code hooks** | A hook event has arrived: when, and from how many sessions. | To-do, with the install command. If the log observer is on, it says activity is coming from Claude Code's session logs meanwhile. |
 | **Agent annotations (MCP)** | The agent has sent an annotation through the MCP server. | Optional. |
 | **Navigator** | It's running in the hub, or a separate `npm run validator` process has posted advice. | Optional when it's off; a warning with the reason when it has stopped on an error. |
+| **Actions** | Every recorded action is accounted for: *N recorded, all accounted for*, with *(M needed a second look)* if any were flagged, or *None yet*. | A warning while any action is unread: *N recorded · M Spectra couldn't read*, pointing at **Oversight → Actions** and, if it's off, the Interpreter. |
 | **Proxy history** | A HAR file has been imported. | Optional. |
 | **Audit log** | It's on: the row shows its directory. | A warning when the hub runs with `SPECTRA_PERSIST=0`. |
 
