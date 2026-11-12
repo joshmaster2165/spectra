@@ -228,20 +228,76 @@ export function extractTargets(tool: string, input: Input, cwd?: string): Target
   return dedupe(out);
 }
 
-function scanShell(cmd: string): { kind: "path" | "host"; value: string }[] {
+function scanShell(rawCmd: string): { kind: "path" | "host"; value: string }[] {
+  const cmd = expandShell(rawCmd);
   const found: { kind: "path" | "host"; value: string }[] = [];
-  for (const m of cmd.matchAll(/\bhttps?:\/\/[^\s'"`|;&<>)]+/gi)) found.push({ kind: "host", value: m[0] });
+  // A value still holding a shell variable, command substitution or brace list
+  // wasn't resolved — skip it rather than map "/$p" or "/{a,b}" as a real target.
+  const unresolved = (s: string) => /[$`{}]/.test(s);
+  for (const m of cmd.matchAll(/\bhttps?:\/\/[^\s'"`|;&<>)]+/gi)) {
+    // `?` and `*` are legitimate in a query string, so check only the URL path.
+    const beforeQuery = m[0].split("?")[0];
+    if (!unresolved(m[0]) && !/[*]/.test(beforeQuery)) found.push({ kind: "host", value: m[0] });
+  }
   for (const m of cmd.matchAll(/\b(?:ssh|scp|rsync|sftp)\b[^|;&]*?\b[\w.-]+@([\w.-]+\.[a-z]{2,}|\d+\.\d+\.\d+\.\d+)/gi)) {
     found.push({ kind: "host", value: `ssh://${m[1]}` });
+  }
+  // Routes of the URLs above: a "path" equal to one is a URL fragment (often from
+  // a curl -w/-o format string), not a file — don't map it or flag it out of scope.
+  const urlRoutes = new Set<string>();
+  for (const f of found) {
+    if (f.kind !== "host") continue;
+    try {
+      urlRoutes.add(new URL(f.value).pathname.replace(/\/+$/, "") || "/");
+    } catch {
+      /* not a parseable URL (ssh://host) */
+    }
   }
   const noUrls = cmd.replace(/\bhttps?:\/\/[^\s'"`]+/gi, " ");
   for (const m of noUrls.matchAll(/(?:^|[\s='"(:])((?:~|\/)[^\s'"`|;&<>()]*)/g)) {
     const p = m[1];
     if (p.split("/").filter(Boolean).length < 2) continue;
+    if (unresolved(p) || /[*?]/.test(p)) continue;
+    if (urlRoutes.has(p.replace(/\/+$/, ""))) continue;
     if (HEURISTIC_IGNORE.some((pre) => p.startsWith(pre))) continue;
     found.push({ kind: "path", value: p });
   }
   return found;
+}
+
+/**
+ * Recon leans on looped one-liners — `for p in a b c; do curl "$B/$p"; done`.
+ * The hook sees one unexpanded command, so expand the simple, safe cases here:
+ * scalar `VAR=value` assignments and `for VAR in items; do … done` loops. The
+ * aim is to recover the real URLs a loop would hit, not to be a shell; anything
+ * left with a `$` is dropped by scanShell rather than mapped as a literal.
+ */
+export function expandShell(cmd: string): string {
+  if (cmd.length > 4000 || !/[$]/.test(cmd)) return cmd;
+  const strip = (v: string) => (/^["'].*["']$/.test(v) ? v.slice(1, -1) : v);
+  // Simple scalar assignments: BASE=http://host, dir=/x/y. No spaces, no `$`.
+  const vars = new Map<string, string>();
+  for (const m of cmd.matchAll(/(?:^|[\s;&|(]|&&|\|\|)([A-Za-z_]\w*)=("[^"$`]*"|'[^'$`]*'|[^\s;&|$`"']+)/g)) {
+    vars.set(m[1], strip(m[2]));
+  }
+  const subst = (text: string, name: string, value: string) =>
+    text.replace(new RegExp("\\$\\{" + name + "\\}|\\$" + name + "(?![A-Za-z0-9_])", "g"), value);
+
+  // Expand for-loops first, substituting the loop variable per item.
+  let out = cmd.replace(
+    /\bfor\s+([A-Za-z_]\w*)\s+in\s+([^\n;]+?)\s*;\s*do\s+([\s\S]*?)\s*;?\s*done/gi,
+    (whole, name: string, itemsRaw: string, body: string) => {
+      const items = itemsRaw
+        .trim()
+        .split(/\s+/)
+        .filter((it) => it && !/[$`(){}*?]/.test(it));
+      if (!items.length) return whole;
+      return items.map((it) => subst(body, name, strip(it))).join("\n");
+    },
+  );
+  // Then substitute scalar variables (a base URL used inside the loop body).
+  for (const [name, value] of vars) out = subst(out, name, value);
+  return out;
 }
 
 function resolvePath(p: string, cwd?: string): string | undefined {
@@ -298,7 +354,10 @@ function isToken(seg: string) {
 function dedupe(ts: Target[]): Target[] {
   const seen = new Set<string>();
   return ts.filter((t) => {
-    const k = `${t.kind}:${t.value}:${t.access}`;
+    // Keep each distinct endpoint on a host: the route (from the url) is part of
+    // the identity, so one command hitting several paths maps all of them.
+    const route = t.kind === "host" && t.url ? (normalizeRoute(t.url) ?? "") : "";
+    const k = `${t.kind}:${t.value}:${t.access}:${route}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
