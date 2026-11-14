@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: 22 }
+          - { os: ubuntu-latest, node: 24 }
+          - { os: macos-latest, node: 24 }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # The capture tests run real commands (curl loops, jq, nc, python) through zsh,
+      # the shell Claude Code uses on macOS, against a lab app on this machine.
+      - name: Install the shell tools the capture tests run
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh jq netcat-openbsd
+
+      - name: Point the lab's hostnames at this machine
+        if: runner.os == 'Linux'
+        run: echo "127.0.0.1 lab.localhost shop.lab.localhost api.lab.localhost admin.lab.localhost staging.lab.localhost" | sudo tee -a /etc/hosts
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test

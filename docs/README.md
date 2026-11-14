@@ -6,12 +6,13 @@ Spectra is a live attack-surface map for authorized, AI-assisted bug hunting. A 
 2. [Setup](setup.md) — the full setup guide: scope, Claude Code hooks, the MCP server, the Navigator and the Interpreter, proxy import, checking it all works, uninstalling.
 3. [Dashboard](dashboard.md) — a tour of every panel and view, the graph controls, and what the colours mean.
 4. [Navigator](navigator.md) — the read-only second model that scores leads and gives verdicts on findings.
-5. [Interpreter](interpreter.md) — the actions Spectra couldn't read, the local scan of command output, and the opt-in model that reads the rest: what it sends and how its answers are checked.
+5. [Interpreter](interpreter.md) — how Spectra reads commands, scripts and their output on its own, the actions it couldn't read, and the opt-in model that reads the rest: what it sends and how its answers are checked.
 6. [Proxy import](proxy-import.md) — putting HAR proxy history on the same map, and what is kept and dropped.
 7. [Configuration](configuration.md) — every environment variable and the config file format.
 8. [Reference](reference.md) — the MCP tools, the hub's HTTP API, and the event and trust model.
 9. [Security](security.md) — local-only binding, trust tiers, scope checks and their limits, command output and what leaves the machine, the hash-chained audit log, what is stored where.
 10. [Troubleshooting](troubleshooting.md) — common failures and how to fix them.
+11. [Testing](testing.md) — running the tests, the lab app they check Spectra against, and adding a case for a command it misreads.
 
 New here? Start with [Getting started](getting-started.md). To report a vulnerability in Spectra itself, see [SECURITY.md](../SECURITY.md).
 

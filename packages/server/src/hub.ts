@@ -13,6 +13,8 @@ import {
   type GraphState,
   type HttpEntry,
   type ImportSummary,
+  type MapNode,
+  type NodeStatus,
   type Scope,
   type ScopeViolation,
   type ServerMessage,
@@ -20,13 +22,15 @@ import {
   type SpectraEvent,
   type TriageState,
 } from "@spectra/schema";
-import { Translator } from "./toolmap.ts";
+import { BROWSER_REASON, browserRole, surfaceIds, Translator, type CallReading, type ToolUse } from "./toolmap.ts";
+import { notRequested, PAGE_NOISE, readNetworkLog, readResults, resultFile } from "./results.ts";
+import { expand } from "./shell.ts";
 import { importEntries } from "./har.ts";
 import { DEFAULT_MODEL, Navigator, type NavigatorStatus } from "./navigator.ts";
 import { SettingsStore } from "./settings.ts";
 import { EngagementStore } from "./engagement.ts";
 import { inferEntries, listsPaths, mineUrls } from "./infer.ts";
-import { Interpreter, type Interpretation, type InterpreterStatus } from "./interpreter.ts";
+import { Interpreter, redact, type Interpretation, type InterpreterStatus } from "./interpreter.ts";
 import { inScope, makeScope, severityOf, type ScopeConfig } from "./scope.ts";
 import { AuditLog } from "./audit.ts";
 
@@ -110,6 +114,8 @@ export class Hub {
   private engagement?: EngagementStore;
   /** What the last restore brought back, for the startup line and the setup checklist. */
   restored: { events: number; sessions: number } | null = null;
+  /** The event that put the current scope in force; repeated at the start of each session's log. */
+  private scopeEvent?: SpectraEvent;
   private settings: SettingsStore;
   /** The Navigator, when it's turned on in Settings and has a key. */
   private navigator?: Navigator;
@@ -119,7 +125,15 @@ export class Hub {
    * The full input and output of actions still waiting to be read. Held in
    * memory only — never written to the audit log or sent to a dashboard.
    */
-  private actionData = new Map<string, { sessionId: string; tool: string; input: string; output?: string }>();
+  private actionData = new Map<string, ActionData>();
+  /** While a call's result is awaited: the nodes it put on the map, and what the nodes it touched looked like before. */
+  private callTouch = new Map<string, { fresh: string[]; prior: [string, NodeStatus][] }>();
+  /** Shell commands awaiting their result, to check afterwards which of their addresses were really requested. */
+  private callCommands = new Map<string, { command: string; cwd?: string }>();
+  /** The call whose events are being published right now. */
+  private currentCall?: string;
+  /** Background task id → the call that started it, so output read later is credited to it. */
+  private bgTasks = new Map<string, string>();
   /** Tool-use id → the command's node, to link a command to what its output revealed. */
   private callNodes = new Map<string, string>();
   /** When each channel last delivered something, for the setup checklist. */
@@ -128,7 +142,12 @@ export class Hub {
   readonly server: http.Server;
 
   constructor(private opts: HubOptions) {
-    this.hooks = new Translator("hook", (e) => this.publish(e));
+    this.hooks = new Translator(
+      "hook",
+      (e) => this.publish(e),
+      (file) => this.readProjectFile(file),
+      (t, reading) => this.withholdFlag(t, reading),
+    );
     this.server = http.createServer((req, res) => this.handleHttp(req, res));
     this.wss = new WebSocketServer({
       server: this.server,
@@ -190,6 +209,7 @@ export class Hub {
         continue; // a line that isn't a usable event
       }
       this.history.push(e);
+      if (e.type === "scope.set") this.scopeEvent = e;
       if (e.source === "hook") this.hookSessions.add(e.sessionId);
       if (e.type === "tool.call") this.seenToolCalls.add(e.toolUseId);
       if (e.type === "tool.result") this.seenToolResults.add(e.toolUseId);
@@ -210,8 +230,12 @@ export class Hub {
     this.sessionCwds.clear();
     this.actionData.clear();
     this.callNodes.clear();
+    this.callTouch.clear();
+    this.callCommands.clear();
+    this.bgTasks.clear();
     this.configureInterpreter(); // drops anything queued for the old map
     this.restored = null;
+    this.scopeEvent = undefined;
     // Sessions still running introduce themselves again on their next event.
     this.hooks.forget();
     this.engagement?.reset();
@@ -236,6 +260,8 @@ export class Hub {
     if (event.type === "finding.upsert" && !this.state.findings[event.finding.id]) {
       event = { ...event, finding: { ...event.finding, sessionId: event.sessionId } };
     }
+    // A bare status change when a call finishes isn't a new reach; a full node is.
+    if (event.type === "node.upsert" && event.source === "hook" && event.node.kind) this.trackTouch(event.node.id);
     this.commit(event);
     if (event.type === "tool.call") {
       this.linkFixes(event);
@@ -268,6 +294,47 @@ export class Hub {
         });
         this.opts.onViolation?.(this.state.violations[this.state.violations.length - 1]);
       }
+    }
+  }
+
+  /** Notes which pending call first put a node on the map, so a call that turns out never to have run can be undone. */
+  private trackTouch(nodeId: string) {
+    // A node another call reaches is no longer one call's alone.
+    for (const [id, t] of this.callTouch) {
+      if (id === this.currentCall) continue;
+      const i = t.fresh.indexOf(nodeId);
+      if (i >= 0) t.fresh.splice(i, 1);
+    }
+    const t = this.currentCall ? this.callTouch.get(this.currentCall) : undefined;
+    if (!t) return;
+    const prev = this.state.nodes[nodeId];
+    if (!prev) t.fresh.push(nodeId);
+    else if (!t.fresh.includes(nodeId) && !t.prior.some(([id]) => id === nodeId)) t.prior.push([nodeId, prev.status]);
+  }
+
+  /**
+   * A file the driver's commands name — a script it runs, a wordlist it loops
+   * over, a results file it wrote — read so the hub can tell what was requested.
+   * Only inside the scope's directories, only small text files; the contents are
+   * used to read the command and are not stored.
+   */
+  private readProjectFile(file: string): string | undefined {
+    if (process.env.SPECTRA_READ_FILES === "0") return;
+    try {
+      const real = fs.realpathSync(file);
+      // Files that exist to hold secrets are never opened, whatever the command does with them.
+      if (SECRET_FILE.test(path.basename(real))) return;
+      const inside = (this.state.scope?.paths ?? []).some((root) => {
+        const r = fs.realpathSync(root);
+        return real === r || real.startsWith(r + path.sep);
+      });
+      if (!inside) return;
+      const stat = fs.statSync(real);
+      if (!stat.isFile() || stat.size > 512_000) return;
+      const text = fs.readFileSync(real, "utf8");
+      return text.slice(0, 2000).includes("\u0000") ? undefined : text;
+    } catch {
+      return; // missing, unreadable, or the scope directory is gone
     }
   }
 
@@ -355,7 +422,42 @@ export class Hub {
         /** Unread actions whose output the hub still holds, so turning the Interpreter on can read them. */
         waiting: [...this.actionData].filter(([id, d]) => d.output && this.isOpen(id)).length,
       },
+      /** MCP tools and servers the operator has said never touch the target. */
+      localTools: this.settings.get().localTools,
     };
+  }
+
+  /**
+   * Flags the hub has reason not to raise: a tool the operator called local, and
+   * a browser whose traffic is already listed as unread for this session — one
+   * open item covers every page worked until the network log is read.
+   */
+  private withholdFlag(t: ToolUse, reading: CallReading): boolean {
+    if (t.name.startsWith("mcp__") && this.isLocalTool(t.name)) return true;
+    return reading.browser === "page" && !!this.openBrowserAction(t.sessionId);
+  }
+
+  private openBrowserAction(sessionId: string) {
+    return Object.values(this.state.actions).find((a) => a.sessionId === sessionId && a.reason === BROWSER_REASON && isUnsettled(a));
+  }
+
+  private isLocalTool(tool: string) {
+    return this.settings.get().localTools.some((t) => t === tool || (t.endsWith("__") && tool.startsWith(t)));
+  }
+
+  /**
+   * The operator says a tool (or a whole MCP server, with a name ending in "__")
+   * never touches the target: its calls stop being listed as unread, and the
+   * ones already listed are settled.
+   */
+  private setLocalTool(name: unknown, local: unknown) {
+    if (typeof name !== "string" || !this.settings.setLocalTool(name, local !== false)) return;
+    if (local === false) return;
+    for (const a of Object.values(this.state.actions)) {
+      if (!isUnsettled(a) || !this.isLocalTool(a.tool)) continue;
+      this.commit({ ts: Date.now(), sessionId: a.sessionId, source: "operator", type: "action.resolve", toolUseId: a.toolUseId, resolution: "dismissed", note: `Marked ${name.endsWith("__") ? "this server's tools" : "this tool"} as not touching the target` });
+      this.actionData.delete(a.toolUseId);
+    }
   }
 
   private updateSettings(patch: { apiKey?: unknown; model?: unknown; enabled?: unknown }, interpreterMode?: unknown) {
@@ -478,21 +580,179 @@ export class Hub {
         this.hooks.session(sessionId, p.cwd, ts);
         this.hooks.thought(sessionId, String(p.prompt ?? ""), ts, "operator prompt");
         break;
-      case "PreToolUse":
-        this.hooks.toolUse({ sessionId, cwd: p.cwd, id: toolUseId, name: p.tool_name, input: p.tool_input ?? {}, ts });
+      case "PreToolUse": {
+        if (this.seenToolCalls.has(toolUseId)) break;
+        remember(this.callTouch, toolUseId, { fresh: [], prior: [] }, 400);
+        this.currentCall = toolUseId;
+        let reading: CallReading;
+        try {
+          reading = this.hooks.toolUse({ sessionId, cwd: p.cwd, id: toolUseId, name: p.tool_name, input: p.tool_input ?? {}, ts });
+        } finally {
+          this.currentCall = undefined;
+        }
+        const command = typeof p.tool_input?.command === "string" ? p.tool_input.command : undefined;
+        if (command && p.tool_name === "Bash") remember(this.callCommands, toolUseId, { command, cwd: p.cwd }, 400);
         // Flagged as unread: keep the whole call for whoever reads it.
-        if (this.isOpen(toolUseId)) remember(this.actionData, toolUseId, { sessionId, tool: String(p.tool_name), input: describeInput(p.tool_input) }, 300);
+        if (this.isOpen(toolUseId)) {
+          remember(this.actionData, toolUseId, { sessionId, tool: String(p.tool_name), input: describeInput(p.tool_input, reading.material), probes: reading.probes, known: reading.known, material: reading.material, command, cwd: p.cwd }, 300);
+        }
         break;
+      }
       case "PostToolUse":
-      case "PostToolUseFailure":
+      case "PostToolUseFailure": {
         this.hooks.toolResult(sessionId, toolUseId, p.hook_event_name === "PostToolUse" && p.ok !== false, ts);
-        // A background command returns only its launch notice; its real output never arrives here.
-        if (typeof p.output === "string" && p.output.trim() && p.tool_input?.run_in_background !== true) this.readOutput(sessionId, toolUseId, String(p.tool_name), p.tool_input, p.output.slice(0, 20_000));
+        // An error message repeats the address it failed on; that isn't the output revealing a target.
+        const unrequested = typeof p.output === "string" && p.output ? this.dropUnrequested(sessionId, toolUseId, p.output.slice(0, OUTPUT_LIMIT), ts) : undefined;
+        this.callTouch.delete(toolUseId);
+        this.callCommands.delete(toolUseId);
+        if (typeof p.task === "string" && p.task) remember(this.bgTasks, p.task, toolUseId, 200);
+        const output = typeof p.output === "string" ? p.output : "";
+        // A browser's own list of the requests its pages made: read as traffic, not as text to interpret.
+        if (browserRole(String(p.tool_name)) === "log") {
+          if (output.trim()) this.readBrowserLog(sessionId, toolUseId, output.slice(0, OUTPUT_LIMIT), ts);
+          break;
+        }
+        // Nothing printed: still worth a look when the call is unread, since its results may be in a file it wrote.
+        if (!output.trim() && !(this.isOpen(toolUseId) && this.actionData.get(toolUseId)?.command)) break;
+        // Output of a background command, read by the driver later: it belongs to the call that started it.
+        const origin = this.backgroundOrigin(p);
+        if (origin) this.readOutput(sessionId, origin, "Bash", undefined, output.replace(/^\s*\d+\t/gm, "").slice(0, OUTPUT_LIMIT));
+        // A background launch returns only a notice, and a file read is file contents, not results.
+        else if (p.tool_input?.run_in_background !== true && p.tool_name !== "Read") this.readOutput(sessionId, toolUseId, String(p.tool_name), p.tool_input, output.slice(0, OUTPUT_LIMIT), unrequested);
+        break;
+      }
+      case "PostToolBatch":
+        // Every call in a finished batch has its result by now; one without was denied before it ran.
+        for (const c of Array.isArray(p.batch) ? p.batch : []) {
+          if (typeof c?.id !== "string" || !this.hooks.isPending(c.id) || this.seenToolResults.has(c.id)) continue;
+          const note = typeof c.note === "string" ? c.note.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+          // An interrupted call did start; only its result is missing.
+          if (/\binterrupt|\bcancell?ed\b/i.test(note)) this.hooks.toolResult(sessionId, c.id, false, ts);
+          else this.skipped(sessionId, c.id, note, ts);
+          this.callTouch.delete(c.id);
+        }
         break;
       case "SessionEnd":
         this.hooks.end(sessionId, ts, p.reason);
         break;
     }
+  }
+
+  /**
+   * The browser's record of what its pages requested. In-scope requests go on
+   * the map as the driver's traffic, and the session's unread browser item is
+   * settled. Requests to other hosts (analytics, CDNs a page pulls in) are
+   * counted and left out: the page asked for them, the driver didn't aim at them.
+   */
+  private readBrowserLog(sessionId: string, toolUseId: string, output: string, ts: number) {
+    const requests = readNetworkLog(output);
+    if (!requests.length) return;
+    const scope = this.state.scope;
+    const mine = requests.filter((r) => {
+      try {
+        const u = new URL(r.url);
+        return !!scope && inScope({ kind: "host", value: u.hostname.toLowerCase(), access: "network" }, scope) && !PAGE_NOISE.test(u.pathname) && r.status !== 404;
+      } catch {
+        return false;
+      }
+    });
+    const pending = this.openBrowserAction(sessionId);
+    const from = pending?.nodeId && this.state.nodes[pending.nodeId] ? pending.nodeId : this.callNodes.get(toolUseId);
+    const before = Object.keys(this.state.nodes).length;
+    if (mine.length && from && this.state.nodes[from]) this.hooks.mapConfirmed(sessionId, ts, from, mine.map((r) => ({ url: r.url, status: r.status })));
+    if (!pending) return;
+    const others = requests.length - mine.length;
+    this.commit({
+      ts,
+      sessionId,
+      source: "hub",
+      type: "action.resolve",
+      toolUseId: pending.toolUseId,
+      resolution: mine.length ? "interpreted" : "nothing",
+      note: `Read ${requests.length} requests from the browser's network log: ${mine.length} to in-scope pages and APIs${others ? `, ${others} left out (other hosts, images, styles, not found)` : ""}`,
+      added: Object.keys(this.state.nodes).length - before,
+    });
+    this.actionData.delete(pending.toolUseId);
+  }
+
+  /** The call a later read of background output belongs to, if this is one. */
+  private backgroundOrigin(p: any): string | undefined {
+    const input = p.tool_input ?? {};
+    const id = p.tool_name === "Read" ? /\/tasks\/([\w-]+)\.output$/.exec(String(input.file_path ?? ""))?.[1] : /^(BashOutput|TaskOutput)$/.test(String(p.tool_name)) ? (input.bash_id ?? input.task_id ?? input.shell_id) : undefined;
+    return typeof id === "string" ? this.bgTasks.get(id) : undefined;
+  }
+
+  /**
+   * A call that was denied or blocked before it ran. Whatever it would have
+   * touched comes off the map again, and nothing is left waiting to be read.
+   */
+  private skipped(sessionId: string, toolUseId: string, note: string, ts: number) {
+    const touch = this.callTouch.get(toolUseId);
+    this.hooks.toolSkipped(sessionId, toolUseId, ts);
+    const base = { ts, sessionId, source: "hub" as const };
+    for (const [id, status] of touch?.prior ?? []) {
+      if (this.state.nodes[id]) this.commit({ ...base, type: "node.upsert", node: { id, status } as MapNode });
+    }
+    const gone = (touch?.fresh ?? []).filter((id) => /^(endpoint|host|domain|param):/.test(id) && this.state.nodes[id]);
+    if (gone.length) this.commit({ ...base, type: "node.remove", nodeIds: gone, reason: "The call that named these never ran" });
+    const leaf = this.callNodes.get(toolUseId);
+    if (leaf && this.state.nodes[leaf]) this.commit({ ...base, type: "node.upsert", node: { id: leaf, status: "unexplored", meta: { "did not run": note || "denied before it ran" } } as unknown as MapNode });
+    if (this.isOpen(toolUseId)) {
+      this.commit({ ...base, type: "action.resolve", toolUseId, resolution: "nothing", note: `Never ran${note ? `: ${note}` : ""}` });
+      this.actionData.delete(toolUseId);
+    }
+  }
+
+  /**
+   * A command ran, but its output says some of what it named was never
+   * requested: the program wasn't found, the shell rejected the word, the host
+   * couldn't be reached. Targets only this call put on the map come off again.
+   */
+  private dropUnrequested(sessionId: string, toolUseId: string, output: string, ts: number): Set<string> {
+    const none = new Set<string>();
+    const call = this.callCommands.get(toolUseId);
+    const touch = this.callTouch.get(toolUseId);
+    if (!call || !touch) return none;
+    const exp = expand(call.command, { cwd: call.cwd, readFile: (f) => this.readProjectFile(f) });
+    const { urls, why, missing } = notRequested(exp, output);
+    // Flagged only because the program was unknown — and it turns out not to exist here, so it ran nothing.
+    const action = this.state.actions[toolUseId];
+    const unknown = action && isUnsettled(action) ? action.reason.match(/^Spectra doesn't know the (\S+) command$/)?.[1] : undefined;
+    if (unknown && missing.includes(unknown)) {
+      this.commit({ ts, sessionId, source: "hub", type: "action.resolve", toolUseId, resolution: "nothing", note: `${unknown} isn't installed here, so it ran nothing` });
+      this.actionData.delete(toolUseId);
+    }
+    if (!urls.size) return none;
+    // An endpoint the same command also requested successfully stays.
+    const kept = new Set<string>();
+    for (const u of exp.urls) if (!urls.has(u.url)) kept.add(surfaceIds(u.url)?.target ?? "");
+    const dropped = new Set<string>();
+    for (const u of urls) {
+      const ids = surfaceIds(u);
+      if (ids && !kept.has(ids.target)) dropped.add(ids.target);
+    }
+    const base = { ts, sessionId, source: "hub" as const };
+    for (const [id, status] of touch.prior) {
+      if (dropped.has(id) && this.state.nodes[id]) this.commit({ ...base, type: "node.upsert", node: { id, status } as MapNode });
+    }
+    const fresh = new Set(touch.fresh);
+    const gone = touch.fresh.filter((id) => this.state.nodes[id] && (dropped.has(id) || (id.startsWith("param:") && dropped.has(`endpoint:${id.slice(6).split("?")[0]}`))));
+    // A host or domain this call introduced, with nothing left under it.
+    const goneSet = new Set(gone);
+    for (const prefix of ["host:", "domain:"]) {
+      for (const id of touch.fresh) {
+        if (!id.startsWith(prefix) || goneSet.has(id) || !this.state.nodes[id] || !fresh.has(id)) continue;
+        const hasChild = Object.values(this.state.nodes).some((n) => n.parentId === id && !goneSet.has(n.id));
+        if (!hasChild) {
+          gone.push(id);
+          goneSet.add(id);
+        }
+      }
+    }
+    if (gone.length) this.commit({ ...base, type: "node.remove", nodeIds: gone, reason: "The command failed before requesting these" });
+    const leaf = this.callNodes.get(toolUseId);
+    if (leaf && this.state.nodes[leaf] && why) this.commit({ ...base, type: "node.upsert", node: { id: leaf, meta: { "not requested": why } } as unknown as MapNode });
+    return urls;
   }
 
   /* ── Reading what the hub couldn't ───────────────────── */
@@ -508,9 +768,10 @@ export class Hub {
    * straight away (a local scan). If the call is one the hub couldn't read,
    * its output is kept for the Interpreter.
    */
-  private readOutput(sessionId: string, toolUseId: string, tool: string, input: unknown, output: string) {
+  private readOutput(sessionId: string, toolUseId: string, tool: string, input: unknown, output: string, unrequested?: Set<string>) {
     const fromNodeId = this.callNodes.get(toolUseId) ?? this.state.actions[toolUseId]?.nodeId;
-    const { events } = inferEntries(this.state, mineUrls(output), { sessionId, source: "hub", fromNodeId });
+    const mined = mineUrls(output).filter((e) => !unrequested?.has(e.url));
+    const { events } = inferEntries(this.state, mined, { sessionId, source: "hub", fromNodeId });
     for (const e of events) this.publish(e);
 
     const mode = this.settings.get().interpreter.mode;
@@ -528,9 +789,56 @@ export class Hub {
     }
     if (!this.isOpen(toolUseId)) return;
     const data = this.actionData.get(toolUseId) ?? { sessionId, tool, input: describeInput(input) };
-    data.output = output;
+    if (output.trim()) data.output = output;
     remember(this.actionData, toolUseId, data, 300);
-    this.interpreter?.enqueue({ toolUseId, tool: data.tool, input: data.input, output });
+    // Result lines the hub can read itself settle the action without the Interpreter.
+    if (this.readResultLines(sessionId, toolUseId, data, output, fromNodeId)) return;
+    if (output.trim()) this.interpreter?.enqueue({ toolUseId, tool: data.tool, input: data.input, output: output.slice(0, 20_000) });
+  }
+
+  /**
+   * Reads the result lines of an unread action's output (or of the file it
+   * wrote them to). Addresses the command is known to have requested go on the
+   * map as the driver's own traffic; others are added as read from the output.
+   * Returns true when every result line was understood and the action is settled.
+   */
+  private readResultLines(sessionId: string, toolUseId: string, data: ActionData, output: string, fromNodeId?: string): boolean {
+    const ctx = { probes: data.known ?? data.probes, material: data.material ?? data.input };
+    let reading = readResults(output, ctx);
+    if (!reading.lines && data.command) {
+      const file = resultFile(data.command);
+      const text = file && this.readProjectFile(path.resolve(data.cwd ?? this.sessionCwds.get(sessionId) ?? "/", file));
+      if (text) reading = readResults(text.slice(0, OUTPUT_LIMIT), ctx);
+    }
+    if (!reading.lines) return false;
+    const before = Object.keys(this.state.nodes).length;
+    const requested = reading.hits.filter((h) => h.requested);
+    if (requested.length && fromNodeId && this.state.nodes[fromNodeId]) this.hooks.mapConfirmed(sessionId, Date.now(), fromNodeId, requested);
+    // A target mapped when the command was read, which the output says wasn't there, keeps its place and says so.
+    for (const g of reading.gone) this.hooks.noteStatus(sessionId, Date.now(), g.url, g.status);
+    const found = reading.hits.filter((h) => !h.requested).map((h) => ({ url: h.url, status: h.status, method: h.method, evidence: maskEvidence(h.evidence) }));
+    const { events, outOfScope } = inferEntries(this.state, found, { sessionId, source: "hub", fromNodeId, readBy: "result lines" });
+    for (const e of events) this.publish(e);
+    const added = Object.keys(this.state.nodes).length - before;
+    data.added = (data.added ?? 0) + added;
+    // Left open when part of the output couldn't be placed, or the output was cut short.
+    if (reading.ambiguous || reading.unplaced || /…\[\d+ characters left out\]…/.test(output)) return false;
+    // What a sweep didn't print (filtered out, or never answered) is said, not folded into "not found".
+    const unshown = data.probes?.length ? Math.max(0, data.probes.length - reading.hits.filter((h) => h.requested).length - reading.dead) : 0;
+    const swept = data.probes?.length ? `Swept ${data.probes.length} addresses: ` : `Read ${reading.lines} result lines: `;
+    this.commit({
+      ts: Date.now(),
+      sessionId,
+      source: "hub",
+      type: "action.resolve",
+      toolUseId,
+      resolution: reading.hits.length ? "interpreted" : "nothing",
+      note: `${swept}${reading.hits.length} answered${reading.dead ? `, ${reading.dead} not found` : ""}${unshown ? `, ${unshown} not shown in the output` : ""}`,
+      added,
+      ignored: outOfScope,
+    });
+    this.actionData.delete(toolUseId);
+    return true;
   }
 
   /** The Interpreter read an action: put what's evidenced and in scope on the map, and settle the action. */
@@ -539,7 +847,10 @@ export class Hub {
     if (!action || !isUnsettled(action)) return;
     const data = this.actionData.get(r.toolUseId);
     const sessionId = data?.sessionId ?? action.sessionId;
-    const { events, added, outOfScope } = inferEntries(this.state, r.targets, { sessionId, source: "interpreter", fromNodeId: action.nodeId });
+    const inferred = inferEntries(this.state, r.targets, { sessionId, source: "interpreter", fromNodeId: action.nodeId });
+    const { events, outOfScope } = inferred;
+    // What the hub's own reading of the result lines already put on the map counts too.
+    const added = inferred.added + (data?.added ?? 0);
     for (const e of events) this.publish(e);
     this.commit({
       ts: Date.now(),
@@ -606,7 +917,11 @@ export class Hub {
     // A malformed node from a script or annotation would break every view that draws it.
     if (e.type === "node.upsert") {
       const n = e.node as Partial<typeof e.node> | undefined;
-      if (!n || typeof n.id !== "string" || !n.id || typeof n.label !== "string" || !NODE_KINDS.includes(n.kind as string)) return false;
+      if (!n || typeof n.id !== "string" || !n.id) return false;
+      // An update to a node already on the map (a status change when a call finishes) may be partial.
+      const known = !!this.state.nodes[n.id];
+      if (n.kind !== undefined ? !NODE_KINDS.includes(n.kind as string) : !known) return false;
+      if (n.label !== undefined ? typeof n.label !== "string" : !known) return false;
     }
     if (e.source === "observer" && this.hookSessions.has(e.sessionId) && e.type !== "thought") return false;
     if (e.type === "tool.call") {
@@ -643,6 +958,7 @@ export class Hub {
   private persist(event: SpectraEvent) {
     if (!this.audit) return;
     if (event.type === "scope.set") {
+      this.scopeEvent = event;
       // Scope is global; record the change in the open log of every session on the map.
       for (const id of this.audit.openSessions()) if (!this.engagement || this.engagement.has(id)) this.audit.append(id, event);
       return;
@@ -651,8 +967,9 @@ export class Hub {
     const joining = !!this.engagement && !this.engagement.has(event.sessionId);
     if (joining) this.engagement!.add(event.sessionId, this.audit.length(event.sessionId));
     if ((joining || !this.audit.isOpen(event.sessionId)) && this.state.scope) {
-      // Each log starts with the scope in force, so replay and verification stand alone.
-      this.audit.append(event.sessionId, { ts: event.ts, sessionId: "hub", source: "hub", type: "scope.set", scope: this.state.scope });
+      // Each log starts with the scope in force, so replay and verification stand alone. It is the
+      // event that set it, as it happened, so a restart restores who set the scope and when.
+      this.audit.append(event.sessionId, this.scopeEvent ?? { ts: event.ts, sessionId: "hub", source: "hub", type: "scope.set", scope: this.state.scope });
     }
     this.audit.append(event.sessionId, event);
   }
@@ -742,6 +1059,7 @@ export class Hub {
             const origin = Array.isArray(body?.paths) ? "config" : (current?.origin ?? "session");
             this.setScope(makeScope({ paths, hosts }, origin), "operator");
           } else if (url.pathname === "/settings") {
+            if (body?.localTool) this.setLocalTool(body.localTool.name, body.localTool.local);
             return json(this.updateSettings(body?.navigator ?? {}, body?.interpreter?.mode));
           } else if (url.pathname === "/navigator/test") {
             return void this.testNavigator().then(json);
@@ -800,11 +1118,40 @@ function remember<V>(map: Map<string, V>, key: string, value: V, limit: number) 
 }
 
 /** A tool call's input as text for a reader: the command for Bash, compact JSON otherwise. */
-function describeInput(input: unknown): string {
+function describeInput(input: unknown, material?: string): string {
   const i = (input ?? {}) as Record<string, unknown>;
   const text = typeof i.command === "string" ? i.command : JSON.stringify(i);
+  // With scripts and loops expanded, when that says more than the command line does.
+  if (material && material.trim() !== text.trim()) return `${text.slice(0, 1200)}\n# as expanded, with the scripts it runs:\n${material.slice(0, 2800)}`;
   return text.slice(0, 4000);
 }
+
+/** What the hub keeps, in memory only, about an action waiting to be read. */
+interface ActionData {
+  sessionId: string;
+  tool: string;
+  input: string;
+  output?: string;
+  /** Addresses the command is known to sweep. */
+  probes?: string[];
+  /** Every address the command is known to request. */
+  known?: string[];
+  /** Targets the hub's own reading of the output has already added. */
+  added?: number;
+  /** The command as expanded, with the source of scripts it runs. */
+  material?: string;
+  command?: string;
+  cwd?: string;
+}
+
+/** A result line kept as evidence: secrets masked as for the Interpreter, and query values dropped. */
+const maskEvidence = (line: string) => redact(line).replace(/([?&][\w.[\]-]+)=[^&\s"']*/g, "$1=");
+
+/** Names of files that hold credentials: environment files, key material, tool credential stores. */
+const SECRET_FILE = /^\.env|\.env$|^\.envrc$|^\.netrc$|^\.npmrc$|^\.pgpass$|^\.git-credentials$|^id_(rsa|dsa|ecdsa|ed25519)|\.(pem|key|p12|pfx|jks|keystore)$|secret|credential|passwd|password|token/i;
+
+/** How much of a command's output the hub reads. */
+const OUTPUT_LIMIT = 200_000;
 
 /** Hooks without tool_use_id: Pre and Post for the same call hash identically. */
 function fallbackToolId(p: any) {

@@ -29,6 +29,8 @@ export interface InferOptions {
   source: "hub" | "interpreter";
   /** The command's node, linked to what its output revealed. */
   fromNodeId?: string;
+  /** Which reader this was, when not the default for the source. */
+  readBy?: string;
 }
 
 const NOISE_PATH = /\.(css|png|jpe?g|gif|svg|ico|webp|avif|bmp|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i;
@@ -40,7 +42,7 @@ export function inferEntries(state: GraphState, entries: InferredEntry[], opts: 
   const fresh = new Map<string, MapNode>();
   const targets = new Set<string>();
   let outOfScope = 0;
-  const readBy = opts.source === "interpreter" ? "interpreter" : "url scan";
+  const readBy = opts.readBy ?? (opts.source === "interpreter" ? "interpreter" : "url scan");
   const surfaceId = `${rootId(opts.sessionId)}:hosts`;
   const add = (node: MapNode) => {
     if (state.nodes[node.id] || fresh.has(node.id)) return false;

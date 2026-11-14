@@ -29,11 +29,11 @@ const RETRY_MS = 30_000;
 const MAX_ATTEMPTS = 3;
 const QUEUE_LIMIT = 200;
 /** What one action may send: the command, and this much of its output. */
-const INPUT_CAP = 3000;
+const INPUT_CAP = 4200;
 const OUTPUT_CAP = 6000;
 const TARGET_CAP = 60;
 
-const SYSTEM = `You are the Interpreter for Spectra, a live map of an AUTHORIZED security test. Another agent ran commands whose targets Spectra could not read. For each action you are given the command and its output (redacted and possibly truncated).
+export const SYSTEM = `You are the Interpreter for Spectra, a live map of an AUTHORIZED security test. Another agent ran commands whose targets Spectra could not read. For each action you are given the command and its output (redacted and possibly truncated).
 
 Your one job: report the web attack surface each action reveals — hosts, endpoints (URL paths), HTTP methods, parameter names and status codes — so it can be put on the map.
 
@@ -48,7 +48,7 @@ Rules:
 - "summary" is one plain sentence saying what the action did.
 - Call submit_interpretation exactly once, with one entry per action, using each action's id exactly as given.`;
 
-const TOOL: Anthropic.Tool = {
+export const TOOL: Anthropic.Tool = {
   name: "submit_interpretation",
   description: "Report the attack surface each action reveals.",
   input_schema: {
@@ -100,7 +100,12 @@ export interface Interpretation {
   targets: InferredEntry[];
   /** Candidates dropped here: malformed, or not evidenced in the material. */
   rejected: number;
+  /** The answer reports nothing and says the action wasn't read: a refusal in the shape of an answer. */
+  declined?: boolean;
 }
+
+/** A summary that says the action wasn't read, rather than that it had nothing to map. */
+const DECLINED = /\bnot interpreted\b|\bcould(?: not|n't) be (?:included|interpreted|read|processed)\b|\bwas stopped\b|\b(?:can(?:not|'t)|unable to|won't|will not) (?:help|assist|read|interpret|process|comply|include)\b|\bdeclin(?:e|ed|ing) to\b/i;
 
 export interface InterpreterStatus {
   /** off: not running · idle · reading: a model call is in flight · error: stopped by a fatal error. */
@@ -126,7 +131,7 @@ export interface InterpreterOptions {
 export class Interpreter {
   private client: Anthropic;
   private model: string;
-  private queue: (InterpretJob & { attempts: number })[] = [];
+  private queue: (InterpretJob & { attempts: number; alone?: boolean })[] = [];
   private timer?: ReturnType<typeof setTimeout>;
   private running = false;
   private stopped = false;
@@ -167,20 +172,30 @@ export class Interpreter {
     if (this.stopped || this.running || !this.queue.length) return;
     const since = Date.now() - this.lastAttempt;
     if (since < MIN_GAP_MS) return this.schedule(MIN_GAP_MS - since);
-    const batch = this.queue.splice(0, BATCH);
+    // An action from a batch the model declined is read again on its own.
+    const firstAlone = this.queue.findIndex((j) => j.alone);
+    const batch = this.queue.splice(0, firstAlone === 0 ? 1 : Math.min(BATCH, firstAlone < 0 ? BATCH : firstAlone));
     this.running = true;
     this.info = { ...this.info, state: "reading" };
     try {
       const results = await this.read(batch);
-      if (!results) {
-        // The model declined the batch. That isn't "nothing to map": say it wasn't read.
-        for (const job of batch) this.opts.onGiveUp(job.toolUseId, "The model declined to read this.");
+      if (!results && batch.length > 1) {
+        // The model declined the whole batch. One action's output can be what it objected to,
+        // so each is asked again by itself rather than all being given up on.
+        this.opts.log?.(`batch declined; reading its ${batch.length} actions one at a time.`);
+        this.queue.unshift(...batch.map((job) => ({ ...job, alone: true })));
+      } else if (!results) {
+        // Declined on its own. That isn't "nothing to map": say it wasn't read.
+        this.opts.onGiveUp(batch[0].toolUseId, "The model declined to read this.");
       } else {
         const byId = new Map(results.map((r) => [r.toolUseId, r]));
         for (const job of batch) {
           const r = byId.get(job.toolUseId);
-          if (r) this.opts.onResult(r);
-          else this.opts.onGiveUp(job.toolUseId, "The model returned nothing for this action.");
+          if (!r) this.opts.onGiveUp(job.toolUseId, "The model returned nothing for this action.");
+          else if (!r.declined) this.opts.onResult(r);
+          // Answered, but only to say it wouldn't read it: ask again alone, and give up if it says so again.
+          else if (batch.length > 1) this.queue.unshift({ ...job, alone: true });
+          else this.opts.onGiveUp(job.toolUseId, "The model declined to read this.");
         }
       }
       this.info = { ...this.info, state: "idle", read: this.info.read + batch.length, lastRun: Date.now(), lastError: undefined };
@@ -235,7 +250,7 @@ export class Interpreter {
   }
 }
 
-function prompt(batch: InterpretJob[]): string {
+export function prompt(batch: InterpretJob[]): string {
   const parts = ["Read these actions. Call submit_interpretation once.", ""];
   for (const job of batch) {
     parts.push(`<action id="${job.toolUseId}" tool="${job.tool}">`);
@@ -311,7 +326,9 @@ export function validate(job: InterpretJob, a: Record<string, unknown>): Interpr
     seen.add(key);
     targets.push(entry);
   }
-  return { toolUseId: job.toolUseId, summary: typeof a.summary === "string" ? oneLine(redact(a.summary), 200) : "", targets, rejected };
+  const summary = typeof a.summary === "string" ? oneLine(redact(a.summary), 200) : "";
+  const declined = !targets.length && !rejected && DECLINED.test(summary);
+  return { toolUseId: job.toolUseId, summary, targets, rejected, ...(declined ? { declined } : {}) };
 }
 
 /**

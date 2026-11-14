@@ -213,6 +213,13 @@ function ReviewForm({ finding }: { finding: Finding }) {
 
 const RESOLUTION_LABEL: Record<ActionResolution, string> = { interpreted: "Interpreted", nothing: "Nothing to map", dismissed: "Dismissed", failed: "Couldn't read" };
 
+/** How an action stands. The hub's own reading of result lines is "Read"; a model's is "Interpreted". */
+function stateLabel(a: OpaqueAction): string {
+  if (!a.resolution) return "Not read";
+  if (a.resolvedBy === "hub") return a.resolution === "interpreted" ? "Read" : a.note?.startsWith("Never ran") ? "Never ran" : "Nothing to map";
+  return RESOLUTION_LABEL[a.resolution];
+}
+
 /**
  * The reconciliation: every tool call is recorded, and these are the ones the
  * hub couldn't read on its own — open until the Interpreter or you settle them.
@@ -228,11 +235,17 @@ function Actions({ state, onSelect }: { state: GraphState; onSelect: (id: string
     const res = await fetch("/actions/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
     setError(!res?.ok);
   };
+  // An MCP server that never touches the target (notes, docs lookups): say so once and its calls stop being listed.
+  const serverOf = (tool: string) => (tool.startsWith("mcp__") && tool.split("__").length >= 3 ? `mcp__${tool.split("__")[1]}__` : undefined);
+  const markLocal = async (name: string) => {
+    const res = await fetch("/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ localTool: { name, local: true } }) }).catch(() => undefined);
+    setError(!res?.ok);
+  };
   const row = (a: OpaqueAction) => (
     <li key={a.toolUseId} className={a.resolution ?? "open"}>
       <div className="action-head">
         <time>{clock(a.ts)}</time>
-        <span className={`action-state ${a.resolution ?? "open"}`}>{a.resolution ? RESOLUTION_LABEL[a.resolution] : "Not read"}</span>
+        <span className={`action-state ${a.resolution ?? "open"}`}>{stateLabel(a)}</span>
         {a.resolution === "interpreted" && <span className="muted">+{a.added} on the map</span>}
         {!!a.ignored && (
           <span className="muted" title="Candidates left off the map: out of scope, or not shown by the command or its output">
@@ -244,12 +257,21 @@ function Actions({ state, onSelect }: { state: GraphState; onSelect: (id: string
             Dismiss
           </button>
         )}
+        {isUnsettled(a) && !readOnly && serverOf(a.tool) && a.reason.startsWith("A tool call with no target") && (
+          <button
+            className="ghost mini"
+            onClick={() => void markLocal(serverOf(a.tool)!)}
+            title={`The ${a.tool.split("__")[1]} tools never touch the target: stop listing their calls. Undo it in Settings.`}
+          >
+            Local tool
+          </button>
+        )}
       </div>
       <p className="action-cmd" onClick={() => a.nodeId && onSelect(a.nodeId)} title="Open this action">
         <b>{formatTool(a.tool)}</b> {a.summary.slice(a.tool.length).trim()}
       </p>
       <p className="muted">
-        {a.reason}.{a.note ? ` ${a.resolvedBy === "operator" ? "You" : "Interpreter"}: ${a.note}` : ""}
+        {a.reason}.{a.note ? ` ${a.resolvedBy === "operator" ? "You" : a.resolvedBy === "hub" ? "Spectra" : "Interpreter"}: ${a.note}` : ""}
         {a.resolution === "failed" && " It will be read again if the Interpreter restarts, or you can dismiss it."}
       </p>
     </li>

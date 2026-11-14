@@ -33,7 +33,16 @@ async function post(events: Payload[]) {
 
 const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
 
-const server = new McpServer({ name: "spectra", version: "0.1.0" });
+const server = new McpServer(
+  { name: "spectra", version: "0.1.0" },
+  {
+    // How to work so the map stays complete. It asks for nothing beyond reporting what was done.
+    instructions:
+      "Spectra maps what you touch from your commands and what they print. Two habits keep that map complete. " +
+      "When you loop over a list or run a script, print one line per request with its status and its path or URL. " +
+      "After working in a browser tool, list the browser's network requests, so the requests the pages made are mapped too.",
+  },
+);
 
 server.tool(
   "map_target",

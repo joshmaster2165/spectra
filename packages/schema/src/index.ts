@@ -105,6 +105,8 @@ export interface Target {
   heuristic?: boolean;
   /** Full URL for host targets, when known; drives the endpoint map. */
   url?: string;
+  /** One of many addresses a command probes: checked against the scope, mapped only once the output shows it answered. */
+  probe?: boolean;
 }
 
 export interface Scope {
@@ -410,7 +412,8 @@ export type SpectraEvent =
       nodeId?: string;
       targets?: Target[];
     })
-  | (Base & { type: "tool.result"; toolUseId: string; ok: boolean })
+  | (Base & { type: "tool.result"; toolUseId: string; ok: boolean; /** false: the call was denied or blocked and never ran. */ ran?: boolean })
+  | (Base & { type: "node.remove"; nodeIds: string[]; reason?: string })
   | (Base & { type: "scope.set"; scope: Scope })
   | (Base & { type: "scope.violation"; violation: ScopeViolation })
   | (Base & { type: "finding.upsert"; finding: Finding })
@@ -425,7 +428,7 @@ export type SpectraEvent =
 export type SpectraEventType = SpectraEvent["type"];
 
 /** Event types only the hub itself may produce; rejected from POST /events. */
-export const HUB_ONLY_EVENTS: SpectraEventType[] = ["scope.set", "scope.violation", "finding.review", "finding.edit", "target.triage", "action.open", "action.resolve"];
+export const HUB_ONLY_EVENTS: SpectraEventType[] = ["scope.set", "scope.violation", "finding.review", "finding.edit", "target.triage", "action.open", "action.resolve", "node.remove"];
 
 /** Only the Navigator (via the hub's /validator endpoint) may produce these; rejected from POST /events. */
 export const VALIDATOR_ONLY_EVENTS: SpectraEventType[] = ["assessment.upsert", "finding.assessment"];
@@ -513,6 +516,14 @@ export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
           [id]: { id, source: e.node.parentId, target: e.node.id },
         };
       }
+      break;
+    }
+    case "node.remove": {
+      // Targets of a call that never ran: nothing reached them, so they don't belong on the map.
+      const gone = new Set(e.nodeIds.filter((id) => state.nodes[id]));
+      if (!gone.size) break;
+      next.nodes = Object.fromEntries(Object.entries(state.nodes).filter(([id]) => !gone.has(id)));
+      next.edges = Object.fromEntries(Object.entries(state.edges).filter(([, edge]) => !gone.has(edge.source) && !gone.has(edge.target)));
       break;
     }
     case "edge.upsert":

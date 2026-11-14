@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 
 // PostToolUseFailure is how Claude Code reports a tool call that failed; without it a failed
 // call never gets a result and its target stays "active" on the map.
-const EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SessionEnd"];
+// PostToolBatch closes each batch of calls: one that has no result by then was denied and never ran.
+const EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch", "SessionEnd"];
 const MATCHER_EVENTS = new Set(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
 const MARKER = "spectra-hook.mjs";
 

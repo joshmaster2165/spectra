@@ -51,7 +51,11 @@ export function buildReport(state: GraphState, audit?: AuditVerification): strin
   const open = unread.filter(isUnsettled);
   out.push(
     `Actions: ${state.counts.toolCalls} recorded, ${unread.length} Spectra couldn't read on its own` +
-      (unread.length ? ` (${unread.filter((a) => a.resolution === "interpreted" || a.resolution === "nothing").length} read by the Interpreter, ${unread.filter((a) => a.resolution === "dismissed").length} dismissed, ${open.length} still not read).` : "."),
+      (unread.length
+        ? ` (${unread.filter((a) => a.resolvedBy === "hub" && a.resolution !== "failed").length} then read by Spectra from their output or found never to have run, ` +
+          `${unread.filter((a) => a.resolvedBy === "interpreter" && (a.resolution === "interpreted" || a.resolution === "nothing")).length} read by the Interpreter, ` +
+          `${unread.filter((a) => a.resolution === "dismissed").length} dismissed, ${open.length} still not read).`
+        : "."),
     "",
   );
   if (open.length) {
@@ -108,7 +112,7 @@ export function buildReport(state: GraphState, audit?: AuditVerification): strin
     out.push("Not verified (audit log unavailable).", "");
   }
 
-  out.push("---", "", "_Findings marked agent-reported are the agent's own claims. Review verdicts and triage marks are the operator's. Navigator entries are a second model's advice. Tags are name-based heuristics, not findings. Shell-derived targets are pattern-matched and may be incomplete. Targets with the source \"output (inferred)\" were read out of a command's output, by a URL scan or a second model, and weren't seen in a request._", "");
+  out.push("---", "", "_Findings marked agent-reported are the agent's own claims. Review verdicts and triage marks are the operator's. Navigator entries are a second model's advice. Tags are name-based heuristics, not findings. Shell-derived targets are pattern-matched and may be incomplete. Targets with the source \"output (inferred)\" were read out of a command's output, by Spectra's own URL scan and result-line reading or by a second model, and weren't seen in a request._", "");
   return out.join("\n");
 }
 

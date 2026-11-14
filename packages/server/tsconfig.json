@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "../schema/src"]
+  "include": ["src", "test", "../schema/src"]
 }

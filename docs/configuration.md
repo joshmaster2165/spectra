@@ -39,7 +39,8 @@ The dashboard's [Settings](dashboard.md#settings) dialog saves the Navigator's a
   },
   "interpreter": {
     "mode": "unread"
-  }
+  },
+  "localTools": ["mcp__notes__"]
 }
 ```
 
@@ -49,6 +50,7 @@ The dashboard's [Settings](dashboard.md#settings) dialog saves the Navigator's a
 | `navigator.model` | The model id. When absent: `SPECTRA_VALIDATOR_MODEL` in the hub's environment, then `claude-opus-5-5`. |
 | `navigator.enabled` | Whether the hub runs the Navigator. It only runs when this is `true` and a key is available. |
 | `interpreter.mode` | What the [Interpreter](interpreter.md) reads: `unread` (actions Spectra can't read) or `all` (those, and any output that lists paths). Off is stored as no mode at all — an empty `interpreter` object. It only runs when a mode is set and a key is available, and it uses `navigator.apiKey` and `navigator.model`. |
+| `localTools` | MCP tools you've marked, from [Oversight → Actions](dashboard.md#actions), as never touching the target: a tool name, or a server prefix ending in `__`. Up to 100. Their calls aren't listed as unread. |
 
 - **Location.** `~/.spectra/settings.json`. `SPECTRA_SETTINGS` points the hub at another file.
 - **Permissions.** The file holds a secret, so the hub writes it owner-only (mode `600`) and resets that mode on every save; it creates the directory, if needed, as `700`.
@@ -76,6 +78,7 @@ Change it through the dashboard, or [`POST /settings`](reference.md#post-setting
 | `SPECTRA_PROJECTS_DIR` | `~/.claude/projects` | Where the log observer looks for Claude Code transcripts. |
 | `SPECTRA_REPLAY` | | `1` makes the log observer read existing Claude Code transcripts from the beginning — including old sessions — instead of only new activity. It doesn't load Spectra's own audit logs; use [Replay](dashboard.md#replay) for those. |
 | `SPECTRA_NOTIFY` | | `0` turns desktop alerts for scope violations off. |
+| `SPECTRA_READ_FILES` | | `0` stops the hub opening the scripts, wordlists and results files a command names. Commands that depend on them are listed as unread instead. See [Interpreter → Files the command names](interpreter.md#files-the-command-names). |
 | `SPECTRA_SETTINGS` | `~/.spectra/settings.json` | Path to the [settings file](#the-settings-file), where the Navigator's key, model and on/off setting and the Interpreter's mode are kept. |
 | `ANTHROPIC_API_KEY` | | Used by the Navigator in the hub, and by the Interpreter, when no key is saved in Settings. A saved key takes its place. |
 | `SPECTRA_VALIDATOR_MODEL` | `claude-opus-5-5` | The Navigator's model — and so the Interpreter's — when none is saved in Settings. |
@@ -88,7 +91,7 @@ The last three only matter when the Navigator or the Interpreter runs in the hub
 | Variable | Default | Read by | Effect |
 |---|---|---|---|
 | `SPECTRA_HUB` | `http://127.0.0.1:4317` | Hook, MCP server, `npm run validator`, importer, demos | The hub's base URL. Set it whenever you change `SPECTRA_PORT`. Use `127.0.0.1`, not `localhost`: the hub only listens on IPv4 loopback. |
-| `SPECTRA_HOOK_OUTPUT` | | Hook | `0` stops the hook forwarding tool output to the hub. Unread actions are still listed, but nothing can read them: no local URL scan and no Interpreter. See [Interpreter → Tool output](interpreter.md#tool-output). |
+| `SPECTRA_HOOK_OUTPUT` | | Hook | `0` stops the hook forwarding tool output to the hub. Unread actions are still listed, but nothing can read them: no local URL scan, no result lines and no Interpreter. See [Interpreter → Tool output](interpreter.md#tool-output). |
 | `SPECTRA_SESSION` | `mcp` | MCP server | The session id the MCP server sends. With the default, the hub attaches annotations to the live Claude Code session; any other value records them under that id. |
 | `ANTHROPIC_API_KEY` | | `npm run validator` | API key for the Navigator's model calls. Read by the Anthropic SDK. |
 | `SPECTRA_VALIDATOR_MODEL` | `claude-opus-5-5` | `npm run validator` | Model id. |
@@ -117,12 +120,14 @@ These aren't configurable, but they're useful to know:
 | Settings dialog refresh (Navigator status, setup checklist) | Every 3 seconds |
 | Triage note | 2,000 characters |
 | Navigator | At most one assessment every 15 seconds; 200 targets per digest (attack surface first); 4,000 output tokens |
-| Tool output forwarded by the hook | `Bash`, `BashOutput`, `WebFetch` and non-Spectra MCP tools only; the first 8,000 and last 4,000 characters of anything over 12,000 |
-| Tool output read by the hub | 20,000 characters per call |
+| Tool output forwarded by the hook | `Bash`, `BashOutput`, `TaskOutput`, `WebFetch`, non-Spectra MCP tools and a `Read` of a background task's output file only; the first 60,000 and last 20,000 characters of anything over 80,000 |
+| Tool output read by the hub | 200,000 characters per call |
+| Files the hub opens to read a command | Inside the scope's directories only; regular text files of up to 512 KB |
+| Sweeps | A loop over more than 12 items, or a fuzzer with a readable wordlist; loops and wordlists of up to 12,000 entries are expanded |
 | Tool output held for unread actions | In memory only, for at most 300 actions |
 | Local URL scan | 150 distinct URLs per output; 20 parameter names per endpoint |
 | Interpreter, per request | Up to 5 actions; at least 4 seconds between requests; 4,000 output tokens |
-| Interpreter, per action | 3,000 characters of the command and 6,000 of its output sent; at most 60 targets and 20 parameter names per target accepted; 3 attempts, 30 seconds apart, before it's settled as *Couldn't read* |
+| Interpreter, per action | About 4,200 characters of the command, with its expanded form, and 6,000 of its output sent; at most 60 targets and 20 parameter names per target accepted; 3 attempts, 30 seconds apart, before it's settled as *Couldn't read* |
 | Interpreter queue | 200 actions |
 | Note on a dismissed action | 500 characters |
 | Unread commands listed in a report | 40 |

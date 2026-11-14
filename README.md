@@ -51,7 +51,7 @@ npm run demo:recon # or the bigger one from the video: ~110 targets of recon
 
 The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then it imports a proxy history that reveals endpoints the agent never touched. When you're ready for a real engagement, follow the [setup guide](docs/setup.md).
 
-**Documentation:** [Getting started](docs/getting-started.md) · [Setup guide](docs/setup.md) · [Dashboard tour](docs/dashboard.md) · [The Navigator](docs/navigator.md) · [The Interpreter](docs/interpreter.md) · [Proxy import](docs/proxy-import.md) · [Reference](docs/reference.md) · [Configuration](docs/configuration.md) · [Security model](docs/security.md) · [Troubleshooting](docs/troubleshooting.md)
+**Documentation:** [Getting started](docs/getting-started.md) · [Setup guide](docs/setup.md) · [Dashboard tour](docs/dashboard.md) · [The Navigator](docs/navigator.md) · [The Interpreter](docs/interpreter.md) · [Proxy import](docs/proxy-import.md) · [Reference](docs/reference.md) · [Configuration](docs/configuration.md) · [Security model](docs/security.md) · [Troubleshooting](docs/troubleshooting.md) · [Testing](docs/testing.md)
 
 ## See it in action
 
@@ -87,14 +87,14 @@ The **Tree** view lays the same surface out as **domain → subdomain → endpoi
 - A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools — that keeps new discoveries in frame as it grows.
 - Every URL becomes a **domain → subdomain → endpoint** tree; numeric IDs, UUIDs, hashes and tokens collapse to `:id` / `:token`, so you see the API's shape, not ten thousand one-off URLs.
 - A sortable **Surface** table and a collapsible **Tree** of the same map, with automatic tags and one filter bar shared with the graph.
-- **Read what commands found.** In-scope URLs printed in a command's output go on the map through a local scan, marked as found in output, not as traffic. The optional **Interpreter** has a second model read the output of scripts and scanners for hosts, endpoints and parameter names. [More →](docs/interpreter.md)
+- **Read what commands did and found.** Spectra expands the loops, variables, scripts and wordlists a command uses and reads the status lines it prints — locally, with no model — so a sweep puts the addresses that answered on the map and leaves the 404s off. In-scope URLs printed in output are added too, marked as found in output, not as traffic. The optional **Interpreter** has a second model read what's left. [More →](docs/interpreter.md)
 - **Import proxy history** (HAR from browser DevTools or any proxy that exports it). Traffic merges onto the same map, and surface the agent never touched shows up as *unmapped* — a ready-made to-do list.
 - Code-review coverage: every in-scope file marked read, edited or **never opened**.
 
 **Stay inside the lines**
 - You define the scope (paths and hosts). Every out-of-scope read, write, exec or network call is flagged in red, with a desktop alert.
 - The agent has no tool to change scope or verdicts, and the hub rejects them on its annotation channel.
-- **Every action is accounted for.** Each tool call is classified: read, nothing to read, or *not read* — a script, a scanner, a URL built from a variable. Unread actions stay listed under **Oversight → Actions** until the Interpreter reads them or you dismiss them, so nothing the agent ran goes unmapped without you knowing.
+- **Every action is accounted for.** Each tool call is classified: read, nothing to read, or *not read* — a script Spectra couldn't open, a scanner whose output it couldn't place, a URL built from a value it couldn't resolve. Unread actions stay listed under **Oversight → Actions** until Spectra reads their results, the Interpreter reads them or you dismiss them, so nothing the agent ran goes unmapped without you knowing. A call Claude Code denied is marked as never run, and the targets it named come off the map.
 
 **Organize the hunt**
 - **Triage marks** on any target — To test, Testing, Tested, Skip — with notes, so recon turns into a worklist before you move to the next phase.
@@ -167,7 +167,7 @@ Every event carries its source, and sources are trusted differently:
 | Hooks · log observer | Every tool call and result, the agent's reasoning | **Ground truth** — what actually ran |
 | MCP server | Discoveries, chain steps, findings | **Claims** — the agent's word |
 | Proxy import | Hosts, endpoints and parameter names from proxy history | **Observed traffic** — what crossed the wire |
-| Local URL scan · Interpreter | Hosts, endpoints and parameter names read out of command output | **Inference** — what a command printed, not a request anyone saw |
+| Local URL scan · result lines · Interpreter | Hosts, endpoints and parameter names read out of command output | **Inference** — what a command printed, not a request anyone saw |
 | Navigator | Leads and finding verdicts | **Advice** — a second model's read |
 | Operator | Scope, review verdicts, triage marks and dismissed actions | **Authority** — yours alone |
 
@@ -182,7 +182,7 @@ The [reference](docs/reference.md) documents every MCP tool and hub route; [conf
 ## Security and privacy
 
 - **Local hub.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins. It makes no outbound connections unless you turn on the Navigator or the Interpreter, which call the Anthropic API. The dashboard also loads its fonts from Google Fonts.
-- **Command output stays local unless you opt in.** The hook forwards the output of shell, fetch and MCP tool calls to your local hub, which holds it in memory and never writes it to the audit log. It leaves the machine only if you turn on the Interpreter — with credentials, tokens and email addresses masked first, on a best-effort basis.
+- **Command output stays local unless you opt in.** The hook forwards the output of shell, fetch and MCP tool calls to your local hub, which reads it in memory and keeps it out of the audit log, apart from a single masked result line kept as evidence for a target read from it. The hub also opens scripts and wordlists inside your scope to read what a command requests; `SPECTRA_READ_FILES=0` turns that off. Output leaves the machine only if you turn on the Interpreter — with credentials, tokens and email addresses masked first, on a best-effort basis.
 - **Model output is checked, not trusted.** Command output is whatever the target sent back. Every target the Interpreter reports must appear in the command or its output and be in scope, and it arrives unmapped and labelled as inference. A planted instruction can at worst add a wrong in-scope candidate.
 - **The Navigator's key stays put.** A key entered in Settings is stored in `~/.spectra/settings.json`, readable only by you, and is never sent back to the browser.
 - **Tamper-evident.** Every event is appended to a hash-chained audit log; `npm run verify` checks it, and exported reports carry the head hash.
@@ -201,7 +201,10 @@ Spectra is for testing you're **authorized** to do — your own code, a contract
 ```bash
 npm run dev         # hub with reload + Vite dashboard on http://localhost:5173
 npm run typecheck
+npm test            # about a minute; runs real commands against a local lab app
 ```
+
+The tests run 64 recon techniques and a recorded Claude Code session against a lab app on your machine, and compare the map with what the lab actually received. Nothing leaves the machine and no API key is used. [Testing](docs/testing.md) explains each suite and how to add a case.
 
 ## License
 

@@ -19,6 +19,8 @@
     "import": "npm run import --workspace @spectra/server --",
     "demo": "npm run demo --workspace @spectra/server",
     "demo:recon": "npm run demo:recon --workspace @spectra/server",
+    "test": "npm test --workspace @spectra/server",
+    "test:model": "npm run test:model --workspace @spectra/server --",
     "typecheck": "tsc -p packages/server && tsc -p packages/web --noEmit",
     "build": "npm run build --workspace @spectra/web",
     "verify": "npm run verify --workspace @spectra/server --"

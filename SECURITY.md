@@ -23,6 +23,7 @@ Areas of particular interest:
 - anything that lets a non-local web page read hub state or post events,
 - ways for the agent's annotation channel to forge scope, operator verdicts or Navigator output,
 - ways for text in a target's responses to put out-of-scope or unevidenced targets on the map through the Interpreter, or to get command output past its masking,
+- ways to make the hub open a file outside the scope's directories when it reads the scripts and wordlists a command names,
 - audit-log tampering that `npm run verify` fails to detect,
 - the hook altering, blocking or delaying a Claude Code tool call.
 

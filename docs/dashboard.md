@@ -202,7 +202,7 @@ What the columns mean:
 | `#` | The order the target first appeared on the map. |
 | **Tags** | The target's automatic [tags](#tags). |
 | **Status** | *unmapped*, *active* or *confirmed* — see [Reading the map](#reading-the-map). |
-| **Source** | **agent** — touched or reported by the agent (hooks, observer or MCP); **proxy** — seen only in imported proxy history; **both** — the agent touched it and the proxy saw it; **output** (a dashed chip) — found in a command's output by the local URL scan or the [Interpreter](interpreter.md), not in a request Spectra saw. An **output** target becomes **agent** when the agent requests it, and **proxy** when an import sees it. |
+| **Source** | **agent** — touched or reported by the agent (hooks, observer or MCP); **proxy** — seen only in imported proxy history; **both** — the agent touched it and the proxy saw it; **output** (a dashed chip) — found in a command's output by the local URL scan, from its result lines or by the [Interpreter](interpreter.md), not in a request Spectra saw. An **output** target becomes **agent** when the agent requests it, and **proxy** when an import sees it. |
 | **Params** / **Endpoints** | How many parameters sit under the endpoint, or endpoints under the host. |
 | **Requests** | How many requests the imported proxy history had for it. |
 | **Lead** | The Navigator's recommendation (*pursue*, *watch* or *skip*) and confidence. Hover for its rationale. |
@@ -237,7 +237,7 @@ One target in detail. It shows the selected target, or the first session root if
 
 - **Header**: its kind, label, status, an *out of scope* tag if it went out of scope, and its [tags](#tags).
 - **Ego graph**: the target in the middle with up to 16 neighbours around it (*+N* for the rest). Click a neighbour to move to it.
-- **Properties**: id, kind, category, parent (click to move to it), importance, and anything else recorded about it — for example the tool and key for a tool-call leaf, the host and an example URL for an endpoint, *seen in*, *requests*, *methods* and *status codes* from proxy history, or *seen in: command output*, *read by* (*url scan* or *interpreter*) and the *evidence* quote for a target found in a command's output.
+- **Properties**: id, kind, category, parent (click to move to it), importance, and anything else recorded about it — for example the tool and key for a tool-call leaf, the host and an example URL for an endpoint, *seen in*, *requests*, *methods* and *status codes* from proxy history, or *seen in: command output*, *read by* (*url scan*, *result lines* or *interpreter*) and the *evidence* quote for a target found in a command's output.
 - **Your triage**: buttons for **To test**, **Testing**, **Tested** and **Skip**, a note box, and **Clear** once a mark is set. The note is saved with the mark: write it, then pick a mark, or edit it on a marked target and click **Save note**. See [Triage](#triage).
 - **Navigator's lead**: when the Navigator has scored this target, its recommendation, confidence, suspected bug class and rationale.
 - **Scope violations**: time, access, target and tool for each violation on this target.
@@ -250,7 +250,8 @@ One target in detail. It shows the selected target, or the first session root if
 
 - Reasoning comes from the log observer (the agent's thinking and replies, up to 400 characters each), from your prompts via hooks (tagged *operator prompt*), from `log_thought`, and from proxy imports (tagged *proxy import*).
 - Tool calls show the tool and its main argument. Out-of-scope calls have a red bar and an *out of scope* tag.
-- A call Spectra couldn't read carries a dashed tag: *not read* while it's open, *interpreted* once the Interpreter has put targets from it on the map, or *settled* when it was dismissed or had nothing to map. A call the Interpreter couldn't read stays *not read*. Hover the tag for the reason. See [Actions](#actions).
+- A call Spectra couldn't read carries a dashed tag: *not read* while it's open, *read* once Spectra has put targets from its result lines on the map, *interpreted* once the Interpreter has, or *settled* when it was dismissed or had nothing to map. A call the Interpreter couldn't read stays *not read*. Hover the tag for the reason. See [Actions](#actions).
+- A call Claude Code denied before it ran is tagged *did not run*, whether or not it was an unread action. See [Interpreter → Calls that never ran](interpreter.md#calls-that-never-ran).
 - Click a tool call to open its target.
 
 **Objects** lists every leaf on the map as a card with its category and importance. Sort by **Importance**, **Category** or **Status**; click a card to open it.
@@ -284,27 +285,30 @@ The Navigator's leads, sorted pursue, watch, skip, then by confidence. Each show
 
 ![The dashboard with Oversight → Actions open: the Oversight header reads 1 violation · 2 not read, the tally reads 11 of 13 actions accounted for · 2 not read with a Dismiss all button, two rows marked Not read — a script and a scanner, each with its reason and a Dismiss button — sit above a row marked Interpreted with +4 on the map and 4 left out; the Activity stream tags the same calls not read and interpreted; and the Surface table, sorted by Source, shows endpoints found in command output with a dashed output chip beside the solid proxy and agent chips](media/actions.png)
 
-Every tool call is recorded. This tab is the reconciliation: which of them Spectra couldn't read — a script, a scanner whose results are in its output, a URL built from a variable — and how each was settled. [Interpreter](interpreter.md#what-spectra-can-read-on-its-own) explains what gets flagged and why.
+Every tool call is recorded. This tab is the reconciliation: which of them Spectra couldn't read in full from the call itself — a script it couldn't open, a scanner or a sweep whose results are in its output, a URL built from a value it couldn't resolve — and how each was settled. [Interpreter](interpreter.md#what-spectra-can-read-on-its-own) explains what gets flagged and why.
 
 - **The tally** reads *N of M actions accounted for*: every recorded tool call, less the ones still not read (including any the Interpreter tried and couldn't read). It's followed by *· N not read* in red while any are open, or *· N needed a second look* once all of them are settled.
 - **Rows** list the open actions first, newest first, then the settled ones. Each shows:
   - the time and a state chip (see below);
-  - *+N on the map* — how many targets the Interpreter added from it;
+  - *+N on the map* — how many targets Spectra's own reading of the output, the Interpreter, or both added from it;
   - *N left out* — candidates the Interpreter reported that didn't reach the map: out of scope, or not shown by the command or its output;
   - the command or tool call. Click it to open it in the **Target** view;
-  - the reason Spectra couldn't read it, then a note if there is one: *Interpreter:* and its one-line summary of what the action did, or *You:* and the note sent with a dismissal.
+  - the reason Spectra couldn't read it, then a note if there is one: *Spectra:* and what its own reading found (for example *Swept 100 addresses: 32 answered, 9 not found, 59 not shown in the output*), *Interpreter:* and its one-line summary of what the action did, or *You:* and the note sent with a dismissal.
+- **Local tool** appears on an open call to an MCP tool whose input names no address. Click it when that server never touches the target — a notes tool, a documentation lookup. All of that server's open calls are settled, and later ones are recorded in the Activity stream without being listed here. Undo it under **Settings → Local tools**, which appears once you've marked one.
 - **Dismiss** settles one open action by hand: nothing in it needs mapping. **Dismiss all** appears when more than one is open. The hub records each dismissal as an operator event. The buttons send no note; [`POST /actions/resolve`](reference.md#post-actionsresolve) takes one.
 - During [replay](#replay) the tab shows the actions as they stood, without the **Dismiss** buttons.
 
 | State chip | Meaning |
 |---|---|
-| **Not read** | Open. Nothing has settled it, so whatever it touched isn't on the map. |
+| **Not read** | Open. Nothing has settled it, so what it touched may not be on the map. |
+| **Read** | Spectra read the [result lines](interpreter.md#result-lines) of its output itself, and put the addresses that answered on the map. No model was involved. |
 | **Interpreted** | The Interpreter read its output and added targets. |
-| **Nothing to map** | The Interpreter read it and reported nothing to add. |
+| **Never ran** | Claude Code denied the call before it ran. The note is Claude Code's own message. See [Interpreter → Calls that never ran](interpreter.md#calls-that-never-ran). |
+| **Nothing to map** | Spectra or the Interpreter read it and found nothing to add — for a sweep, no address answered. |
 | **Dismissed** | You settled it. |
 | **Couldn't read** | The Interpreter tried and gave up, or the model declined; the note says why. It still counts as not read, keeps its **Dismiss** button, and is read again if the Interpreter restarts. |
 
-With the Interpreter off, actions stay **Not read** until you dismiss them. Before any action has been flagged, the tab says that Spectra could read every action so far.
+With the Interpreter off, an action Spectra can't settle from its result lines stays **Not read** until you dismiss it. Before any action has been flagged, the tab says that Spectra could read every action so far.
 
 ### Scope
 
@@ -342,7 +346,7 @@ While replaying, every panel shows the session as of the scrubber position, **Re
 - the session id, time span, tool-call count (and failures) and files opened and edited;
 - the scope and who set it;
 - a summary table of findings by severity and your verdicts, and the number of violations;
-- an **Actions:** line — how many tool calls were recorded, how many Spectra couldn't read on its own, and of those how many the Interpreter read, how many you dismissed and how many are still unread — followed by the commands still not read (the first 40), each with its reason;
+- an **Actions:** line, such as *Actions: 41 recorded, 5 Spectra couldn't read on its own (2 then read by Spectra from their output or found never to have run, 1 read by the Interpreter, 1 dismissed, 1 still not read).* — followed by the commands still not read (the first 40), each with its reason;
 - **Attack surface**: the number of hosts, endpoints and parameters, a tally of your triage marks, and then, for each host with endpoints or a triage mark, the host's tags and mark and a table of its endpoints — tags, status, who saw it (*agent*, *proxy*, *agent + proxy*, or *output (inferred)* for a target found only in a command's output), parameters, the Navigator's lead and your triage mark and note;
 - each finding with its severity, the agent's confidence and status, the Navigator's verdict (a *Navigator:* line with its confidence and rationale, when it has given one), your verdict and note, location, description, evidence trail and remediation;
 - a table of scope violations;

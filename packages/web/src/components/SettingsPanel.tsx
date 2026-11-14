@@ -52,6 +52,7 @@ function ago(ts: number | null | undefined) {
 export function SettingsPanel({ state, onClose }: { state: GraphState; onClose: () => void }) {
   const [nav, setNav] = useState<NavigatorView>();
   const [interp, setInterp] = useState<InterpreterView>();
+  const [localTools, setLocalTools] = useState<string[]>([]);
   const [health, setHealth] = useState<Health>();
   const [offline, setOffline] = useState(false);
 
@@ -60,6 +61,7 @@ export function SettingsPanel({ state, onClose }: { state: GraphState; onClose: 
       const [s, h] = await Promise.all([fetch("/settings").then((r) => r.json()), fetch("/health").then((r) => r.json())]);
       setNav(s.navigator);
       setInterp(s.interpreter);
+      setLocalTools(s.localTools ?? []);
       setHealth(h);
       setOffline(false);
     } catch {
@@ -90,6 +92,7 @@ export function SettingsPanel({ state, onClose }: { state: GraphState; onClose: 
           {offline && <p className="alert-text">Can't reach the hub. Is `npm start` still running?</p>}
           {nav && <NavigatorSettings nav={nav} onSaved={setNav} />}
           {nav && interp && <InterpreterSettings nav={nav} interp={interp} onSaved={setInterp} />}
+          {localTools.length > 0 && <LocalTools tools={localTools} onSaved={setLocalTools} />}
           <ScopeSettings state={state} onSaved={refresh} />
           {health && <EngagementSettings health={health} targets={Object.keys(state.nodes).length} onReset={refresh} />}
           {health && <SetupChecklist health={health} />}
@@ -233,6 +236,30 @@ function InterpreterSettings({ nav, interp, onSaved }: { nav: NavigatorView; int
         {interp.mode === "off" && interp.waiting > 0 && `${interp.waiting} unread action${interp.waiting === 1 ? " is" : "s are"} waiting with output in hand. `}
         {s.state !== "error" && s.lastError && `Last error: ${s.lastError}`}
       </p>
+    </section>
+  );
+}
+
+/** MCP tools the operator marked, from Oversight → Actions, as never touching the target. */
+function LocalTools({ tools, onSaved }: { tools: string[]; onSaved: (t: string[]) => void }) {
+  const remove = async (name: string) => {
+    const res = await post("/settings", { localTool: { name, local: false } }).catch(() => undefined);
+    if (res?.ok) onSaved((await res.json()).localTools ?? []);
+  };
+  return (
+    <section className="settings-section">
+      <h3>Local tools</h3>
+      <p className="hint">Tools you've said never touch the target. Their calls are still recorded in the activity ledger, but aren't listed as unread.</p>
+      <ul className="local-tools">
+        {tools.map((t) => (
+          <li key={t}>
+            <code>{t.endsWith("__") ? `${t.split("__")[1]} (all tools)` : t.split("__").slice(1).join(" · ")}</code>
+            <button className="ghost mini" onClick={() => void remove(t)} title="List this tool's calls as unread again">
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

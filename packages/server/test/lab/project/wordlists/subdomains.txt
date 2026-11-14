@@ -1,0 +1,13 @@
+www
+shop
+api
+admin
+staging
+dev
+test
+mail
+vpn
+cdn
+portal
+internal
+beta

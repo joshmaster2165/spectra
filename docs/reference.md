@@ -102,7 +102,7 @@ Targets are keyed by id, and an event with an existing id updates that target. T
 | Parameter | `param:<hostname><normalized route>?<name>` | `param:api.example-shop.test/api/users/:id?role` |
 | Proxy-import root | `import:<file-name slug>` | `import:history.har` |
 
-Normalized routes keep the first six path segments, replace numeric segments, UUIDs and long hex strings with `:id`, and replace token-like segments with `:token`. A fuzzer's placeholder in a shell command's URL (`FUZZ`, `FUZ2Z` and the like) is never mapped as a segment: the URL up to the placeholder is used, or the URL without its query string when the placeholder is in a query value. Targets read out of command output — by the local URL scan or the Interpreter — use the same ids, so one found in output and later requested by the agent is one node. Tool categories are `files` (Read, Edit, MultiEdit, Write, NotebookEdit, LS), `searches` (Glob, Grep), `commands` (Bash, BashOutput), `web` (WebFetch, WebSearch), `agents` (Task, Agent), `mcp` (any `mcp__…` tool) and `other`.
+Normalized routes keep the first six path segments, replace numeric segments, UUIDs and long hex strings with `:id`, and replace token-like segments with `:token`. A fuzzer's placeholder in a shell command's URL (`FUZZ`, `FUZ2Z` and the like) is never mapped as a segment: the URL up to the placeholder is used, or the URL without its query string when the placeholder is in a query value. Targets read out of command output — by the local URL scan, from result lines or by the Interpreter — use the same ids, so one found in output and later requested by the agent is one node. Tool categories are `files` (Read, Edit, MultiEdit, Write, NotebookEdit, LS), `searches` (Glob, Grep), `commands` (Bash, BashOutput), `web` (WebFetch, WebSearch), `agents` (Task, Agent), `mcp` (any `mcp__…` tool) and `other`.
 
 ## Hub HTTP API
 
@@ -167,17 +167,19 @@ An `OpaqueAction` is one [unread action](interpreter.md#what-spectra-can-read-on
   nodeId?: string;        // the call's node on the map
   reason: string;         // why the hub couldn't read it
   resolution?: "interpreted" | "nothing" | "dismissed" | "failed";  // absent while it's open
-  resolvedBy?: string;    // the source of the event that settled it: "interpreter" or "operator"
+  resolvedBy?: string;    // the source of the event that settled it: "hub", "interpreter" or "operator"
   resolvedTs?: number;
   note?: string;          // one line from whoever settled it
-  added?: number;         // targets the Interpreter put on the map
-  ignored?: number;       // candidates it left off: out of scope, or not shown by the material
+  added?: number;         // targets put on the map from its output, by the hub's own reading and the Interpreter
+  ignored?: number;       // candidates left off: out of scope, or not shown by the material
 }
 ```
 
+`resolvedBy: "hub"` means Spectra settled the action itself: with `interpreted`, it read the [result lines](interpreter.md#result-lines) of the output (shown as **Read**); with `nothing`, it read them and nothing answered, or — when `note` starts with *Never ran* — Claude Code denied the call before it ran.
+
 The state holds only this record. The action's output is kept in the hub's memory and isn't part of the state, the history or the audit log.
 
-Targets read out of command output are ordinary nodes with these `meta` properties: `seen in: "command output"`, `read by: "url scan"` or `"interpreter"`, and for an endpoint `host`, `example`, and — from the Interpreter — `methods`, `status codes` and `evidence` when it had them.
+Targets read out of command output are ordinary nodes with these `meta` properties: `seen in: "command output"`, `read by: "url scan"`, `"result lines"` or `"interpreter"`, and for an endpoint `host`, `example`, and — from result lines and the Interpreter — `methods`, `status codes` and `evidence` when they had them.
 
 ### GET /sessions
 
@@ -235,9 +237,12 @@ The Navigator's and the Interpreter's settings as the dashboard may see them, an
     "mode": "unread",
     "status": { "state": "idle", "model": "claude-opus-5-5", "read": 12, "queued": 0, "lastRun": 1794430185300 },
     "waiting": 0
-  }
+  },
+  "localTools": ["mcp__notes__"]
 }
 ```
+
+`localTools` lists the MCP tools the operator has said never touch the target: a tool name, or a server prefix ending in `__` that covers all of its tools. Their calls are recorded but not listed as unread.
 
 | Field | Meaning |
 |---|---|
@@ -309,11 +314,28 @@ A Claude Code hook payload, as sent by `packages/server/bin/spectra-hook.mjs`:
 }
 ```
 
-`prompt` is included for `UserPromptSubmit` and `reason` for `SessionEnd`.
+`prompt` is included for `UserPromptSubmit` and `reason` for `SessionEnd`. Two more fields are sent when they apply:
 
-`output` is included on `PostToolUse` and `PostToolUseFailure` for `Bash`, `BashOutput`, `WebFetch` and MCP tools other than Spectra's own: the call's output as one string, capped by the hook at the first 8,000 and last 4,000 characters, and never sent for any other tool. `SPECTRA_HOOK_OUTPUT=0` in Claude Code's environment leaves it out. The hub reads at most 20,000 characters of it, scans it for in-scope URLs, and keeps it in memory only while the call is an open unread action — see [Interpreter → Tool output](interpreter.md#tool-output). It's never recorded as an event.
+| Field | Sent on | Value |
+|---|---|---|
+| `task` | The `PostToolUse` of a background command | The background task's id, so output read from that task later is credited to this call. |
+| `batch` | `PostToolBatch` | `[{ id, note }]`, one entry per call in the finished batch: its tool-use id, and the first 200 characters of what the model was shown as its result. |
 
-Handled events: `SessionStart`, `UserPromptSubmit` (the prompt becomes a thought tagged *operator prompt*), `PreToolUse` (a tool call), `PostToolUse` (its result) and `PostToolUseFailure` (its result, always a failure), `SessionEnd`. These are the six events `npm run hooks:install` registers. The hub turns them into events with the source `hook` — including an `action.open` for a tool call it can't read. Targets the local scan finds in `output` are recorded with the source `hub`. A payload without `session_id` is ignored. Responds **202**.
+`output` is included on `PostToolUse` and `PostToolUseFailure` for `Bash`, `BashOutput`, `TaskOutput`, `WebFetch` and MCP tools other than Spectra's own, and for a `Read` of a background task's output file (`…/tasks/<id>.output`). It's the call's output as one string: up to 80,000 characters as they are, or the first 60,000 and last 20,000 of anything longer. It's never sent for any other tool, and `SPECTRA_HOOK_OUTPUT=0` in Claude Code's environment leaves it out. The hub reads at most 200,000 characters of it, scans it for in-scope URLs, reads its result lines if the call is an open unread action, and keeps it in memory only while that action stays open — see [Interpreter → Tool output](interpreter.md#tool-output). It's never recorded as an event.
+
+Handled events:
+
+| Event | Becomes |
+|---|---|
+| `SessionStart` | A session. |
+| `UserPromptSubmit` | A thought tagged *operator prompt*. |
+| `PreToolUse` | A tool call. |
+| `PostToolUse` | Its result. |
+| `PostToolUseFailure` | Its result, always a failure. |
+| `PostToolBatch` | For each call in `batch` that has no result: a `tool.result` with `ok: false, ran: false`, because the call was denied before it ran. An entry whose `note` says the call was interrupted or cancelled gets an ordinary failed result instead. |
+| `SessionEnd` | The end of the session. |
+
+These are the seven events `npm run hooks:install` registers. The hub turns them into events with the source `hook` — including an `action.open` for a tool call it can't read. What the hub adds on its own account carries the source `hub`: targets the local scan and the result lines find in `output`, the settling of an action it read itself, and, for a call that never ran, a `node.remove` for the targets only that call had put on the map. A payload without `session_id` is ignored. Responds **202**.
 
 ### POST /events
 
@@ -324,7 +346,7 @@ One event or an array of events (see [Events](#events)) from the MCP server or a
 ```
 
 - The source is forced to `mcp`, unless the event says `"source": "demo"`. Any other source is replaced.
-- Events of the hub-only types (`scope.set`, `scope.violation`, `finding.review`, `finding.edit`, `target.triage`, `action.open`, `action.resolve`) and the Navigator-only types (`assessment.upsert`, `finding.assessment`) are silently dropped.
+- Events of the hub-only types (`scope.set`, `scope.violation`, `finding.review`, `finding.edit`, `target.triage`, `action.open`, `action.resolve`, `node.remove`) and the Navigator-only types (`assessment.upsert`, `finding.assessment`) are silently dropped.
 - `ts` defaults to the time of receipt.
 - A `finding.upsert` is stamped `reportedBy` with the source.
 
@@ -445,6 +467,8 @@ Changes the Navigator's settings, the Interpreter's mode, or both. Send only the
 { "navigator": { "apiKey": "sk-ant-...", "model": "claude-opus-5-5", "enabled": true }, "interpreter": { "mode": "unread" } }
 ```
 
+To mark an MCP tool or server as local, or undo that, send `{ "localTool": { "name": "mcp__notes__", "local": true } }`. The name must be an MCP tool (`mcp__server__tool`) or a server prefix (`mcp__server__`); anything else is ignored. Marking one settles its open actions as dismissed by the operator.
+
 | Field | Notes |
 |---|---|
 | `apiKey` | A string of up to 400 characters with no whitespace. An empty string clears the saved key. |
@@ -493,12 +517,13 @@ Every event has `ts` (milliseconds since the epoch), `sessionId`, `source` and `
 |---|---|---|
 | `session.start` | `cwd?`, `title?` | Hooks, observer, demos |
 | `session.end` | `reason?` | Hooks |
-| `node.upsert` | `node` (merged into an existing node with the same id; a `parentId` adds a containment edge) | Hooks, observer, MCP, demos, proxy import, the local URL scan, the Interpreter |
-| `edge.upsert` | `edge` | Hooks, observer, MCP, demos, the local URL scan, the Interpreter |
+| `node.upsert` | `node` (merged into an existing node with the same id; a `parentId` adds a containment edge) | Hooks, observer, MCP, demos, proxy import, the local URL scan, result lines, the Interpreter |
+| `edge.upsert` | `edge` | Hooks, observer, MCP, demos, the local URL scan, result lines, the Interpreter |
 | `chain.step` | `step` | MCP, demos |
 | `thought` | `text`, `reason?` | Hooks (prompts), observer (reasoning), MCP, proxy import |
 | `tool.call` | `toolUseId`, `tool`, `summary`, `nodeId?`, `targets?` | Hooks, observer, demos |
-| `tool.result` | `toolUseId`, `ok` | Hooks, observer |
+| `tool.result` | `toolUseId`, `ok`, `ran?` (`false`: Claude Code denied the call before it ran; `ok` is `false` too) | Hooks, observer |
+| `node.remove` | `nodeIds`, `reason?` (the nodes, and the edges that touch them, leave the map) | Hub only: the targets that only a call that never ran had put on the map |
 | `finding.upsert` | `finding` (merged by id) | MCP, demos |
 | `scope.set` | `scope` | Hub only |
 | `scope.violation` | `violation` | Hub only |
@@ -506,11 +531,11 @@ Every event has `ts` (milliseconds since the epoch), `sessionId`, `source` and `
 | `finding.review` | `findingId`, `review` | Hub only, from `POST /review` |
 | `target.triage` | `nodeId`, `triage` (`{ state, note?, ts }`, or `null` to clear the mark) | Hub only, from `POST /triage` |
 | `action.open` | `action` (`{ toolUseId, tool, summary, nodeId?, reason }`) | Hub only: written as a tool call arrives through hooks or the observer and can't be read, or by the hub itself when the Interpreter's `all` mode picks up a call's output |
-| `action.resolve` | `toolUseId`, `resolution` (`interpreted`, `nothing`, `dismissed` or `failed`), `note?`, `added?`, `ignored?` | Hub only: the Interpreter in the hub, or `POST /actions/resolve` |
+| `action.resolve` | `toolUseId`, `resolution` (`interpreted`, `nothing`, `dismissed` or `failed`), `note?`, `added?`, `ignored?` | Hub only: the hub's own reading of an action's result lines, a call that never ran, the Interpreter in the hub, or `POST /actions/resolve` |
 | `assessment.upsert` | `assessment` | Navigator only: the Navigator in the hub, or `POST /validator` |
 | `finding.assessment` | `findingId`, `assessment` | Navigator only: the Navigator in the hub, or `POST /validator` |
 
-A `tool.call`'s `targets` are what scope checks run on: `{ kind: "path" | "host", value, access: "read" | "write" | "exec" | "network", heuristic?, url? }`. `heuristic: true` marks a target pattern-matched out of a shell command.
+A `tool.call`'s `targets` are what scope checks run on: `{ kind: "path" | "host", value, access: "read" | "write" | "exec" | "network", heuristic?, url?, probe? }`. `heuristic: true` marks a target pattern-matched out of a shell command. `probe: true` marks a host a [sweep](interpreter.md#sweeps) touches: it's checked against the scope like any other target, but not mapped until the output shows an address on it answered.
 
 The hub de-duplicates `tool.call` and `tool.result` by `toolUseId`, and drops the observer's tool events for any session that reports through hooks (keeping its reasoning).
 
@@ -536,7 +561,7 @@ Every event carries the source it arrived through, and the hub decides the sourc
 
 | Source | Arrives through | Provides | Trust |
 |---|---|---|---|
-| `hook` | `POST /hooks`, from Claude Code's hooks | Tool calls and results, your prompts, session start and end | **Ground truth** — what actually ran |
+| `hook` | `POST /hooks`, from Claude Code's hooks | Tool calls and results, your prompts, session start and end. Addresses a sweep is known to request are added once a result line in its output shows they answered | **Ground truth** — what actually ran |
 | `observer` | The hub reading Claude Code's transcripts | Tool calls and results, the agent's reasoning | **Ground truth** |
 | `mcp` | `POST /events` (default) | Discoveries, links, chain steps, findings, thoughts | **Claims** — the agent's word; findings are labelled *agent-reported* |
 | `demo` | `POST /events` with `"source": "demo"` | Scripted sessions | **Claims** — a script's word |
@@ -544,14 +569,14 @@ Every event carries the source it arrived through, and the hub decides the sourc
 | `validator` | The Navigator in the hub, or `POST /validator` | Leads and finding verdicts | **Advice** — a second model's read |
 | `interpreter` | The Interpreter in the hub; no route | Targets read out of command output, and the settling of the actions it read | **Inference** — a model's reading of what a command printed, checked in code; not observed traffic |
 | `operator` | `POST /review`, `POST /scope`, `POST /triage`, `POST /actions/resolve`, `POST /engagement/new` | Finding verdicts, scope changes, triage marks, dismissed actions and clearing the map | **Authority** — yours |
-| `hub` | The hub itself | Scope from the config file or session directories, scope violations, linked fix edits, actions opened in the Interpreter's `all` mode | **Derived** — the hub's own records |
-| `hub` | The hub's local URL scan of forwarded output | In-scope URLs printed in command output: hosts, endpoints and parameter names | **Inference** — found in output, not in a request; marked `read by: url scan` |
+| `hub` | The hub itself | Scope from the config file or session directories, scope violations, linked fix edits, actions opened in the Interpreter's `all` mode, actions it settled from their result lines, and the removal of targets named by a call that never ran | **Derived** — the hub's own records |
+| `hub` | The hub's local URL scan and result-line reading of forwarded output | In-scope URLs printed in command output, and addresses on result lines that the command wasn't known to request: hosts, endpoints and parameter names | **Inference** — found in output, not in a request; marked `read by: url scan` or `read by: result lines` |
 
 Channel rules the hub enforces:
 
 - `/events` can't produce scope, violations, reviews, triage marks, fix links, unread-action records, leads or verdicts.
 - `/validator` can only produce leads and verdicts.
-- `/hooks` can only produce what the hook translator emits from a hook payload, plus the unmapped targets the local scan finds in its `output`.
+- `/hooks` can only produce what the hook translator emits from a hook payload, plus what the hub reads out of its `output` — the unmapped targets the local scan and the result lines find, and the settling of that call's action — and the undoing of a call its `batch` shows never ran.
 - No route produces `interpreter` events. The Interpreter can only add unmapped, in-scope targets and settle the actions it read.
 
 These rules separate the channels; they don't authenticate the caller. Any local process can post to any route. See [Security](security.md#trust-tiers).

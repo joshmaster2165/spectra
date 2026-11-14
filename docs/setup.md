@@ -92,13 +92,13 @@ npm run hooks:install -- --user
 | A project directory | `/path/to/target-repo/.claude/settings.local.json` |
 | `--user` | `~/.claude/settings.json` |
 
-The installer merges Spectra's hook into six events — `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `SessionEnd` (matcher `*` for the three tool events) — with a 2-second timeout. It keeps your existing settings and other hooks, and re-running it is safe: it replaces its own entry rather than adding another. Pass the project directory as an absolute path.
+The installer merges Spectra's hook into seven events — `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch` and `SessionEnd` (matcher `*` for `PreToolUse`, `PostToolUse` and `PostToolUseFailure`) — with a 2-second timeout. It keeps your existing settings and other hooks, and re-running it is safe: it replaces its own entry rather than adding another. Pass the project directory as an absolute path.
 
 **Restart any running Claude Code sessions** in that project (or all of them, for `--user`). Hooks load when a session starts.
 
-> **Upgrading Spectra?** The installed hook entry points at the hook script in your checkout, so pulling a new version updates the hook as well. Restart the hub (`npm start`) to run the new version. You don't need to run the installer again or restart Claude Code to get output forwarding: sessions that were already running pick it up on their next tool call.
+> **Upgrading Spectra?** The installed hook entry points at the hook script in your checkout, so pulling a new version updates the hook as well. Restart the hub (`npm start`) to run the new version. You don't need to run the installer again or restart Claude Code to get changes to the hook script, such as output forwarding: sessions that were already running pick them up on their next tool call. A hook event Spectra has started registering since you installed is the exception — see the next note.
 
-> **Installed the hooks before `PostToolUseFailure` was added?** Run the installer again, then restart Claude Code. Claude Code reports a failed tool call only through `PostToolUseFailure`; without it a failed command never gets a result, and its target stays **active** on the map. (Checked against Claude Code 2.1.303.)
+> **Installed the hooks before `PostToolUseFailure` or `PostToolBatch` was added?** Run `npm run hooks:install -- /path/to/target-repo` (or `-- --user`) again, then restart Claude Code. Claude Code reports a failed tool call only through `PostToolUseFailure`; without it a failed command never gets a result, and its target stays **active** on the map. (Checked against Claude Code 2.1.303.) `PostToolBatch` is how Spectra learns that Claude Code denied a call before it ran; without it the targets that call named stay on the map as if they'd been reached. See [Interpreter → Calls that never ran](interpreter.md#calls-that-never-ran).
 
 To remove them, run the same command with `--remove`:
 
@@ -113,8 +113,8 @@ The hook command contains the absolute path to `packages/server/bin/spectra-hook
 
 - It never prints to stdout (hook output can steer Claude Code) and always exits 0 (a non-zero exit can block a tool call).
 - It gives up on the hub after 300 ms, so a stopped hub never slows the agent down.
-- It sends the event name, session id, working directory, tool name and id, the tool input, the prompt text for `UserPromptSubmit`, and whether the call succeeded. It strips file contents and patches (`content`, `new_string`, `old_string`, `edits`, `new_source`) before sending.
-- For `Bash`, `BashOutput`, `WebFetch` and MCP tools other than Spectra's own, it also sends the call's **output** — the first 8,000 and last 4,000 characters of anything long — so the hub can read what a command found. It never sends the output of the file tools. The output goes to your local hub, is held in memory only, and isn't written to the audit log. Set `SPECTRA_HOOK_OUTPUT=0` in the environment you start Claude Code from to send none. See [Interpreter → Tool output](interpreter.md#tool-output).
+- It sends the event name, session id, working directory, tool name and id, the tool input, the prompt text for `UserPromptSubmit`, and whether the call succeeded. For a background command it adds the task id, and for `PostToolBatch` the id of each call in the batch with the first 200 characters of its result. For Claude Code's own file tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`) it strips file contents and patches (`content`, `new_string`, `old_string`, `edits`, `new_source`) before sending. Any other tool's input is sent whole, each text field cut to 20,000 characters, because an MCP tool's `content` may be the request it sends.
+- For `Bash`, `BashOutput`, `TaskOutput`, `WebFetch` and MCP tools other than Spectra's own, it also sends the call's **output** — up to 80,000 characters, or the first 60,000 and last 20,000 of anything longer — so the hub can read what a command found. It never sends the output of the file tools, with one exception: a `Read` of a background command's output file, which is that command's output. The output goes to your local hub, is held in memory only, and isn't written to the audit log. Set `SPECTRA_HOOK_OUTPUT=0` in the environment you start Claude Code from to send none. See [Interpreter → Tool output](interpreter.md#tool-output).
 
 ### The log observer (fallback)
 
@@ -155,6 +155,7 @@ Every parameter is listed in the [Reference](reference.md#mcp-tools).
 
 Things to know:
 
+- The server also gives the agent two working habits, as its instructions: print one line per request with its status and path when looping or scripting, and list the browser's network requests after working in a browser tool. Both are there so the hub can read what was done; neither tells the agent what to test.
 - Anything sent this way is labelled **agent-reported** — a claim to check, not ground truth. There is deliberately no tool for scope, operator verdicts or Navigator output, and the hub drops those event types if they arrive on this channel.
 - Annotations are attached to the live Claude Code session, so the agent's findings appear in that session's audit log, replay and report. (Set `SPECTRA_SESSION` in the server's environment to record them under a session id of your own instead.)
 - If the hub isn't running, the tools still return success to the agent; the error goes to the server's stderr.
@@ -191,7 +192,7 @@ Use one or the other, not both at once: each would assess every change, and you'
 
 ### The Interpreter (optional)
 
-Spectra records every tool call, but it can only map the ones whose targets are written in the call. Scripts, scanners and commands built from variables are listed under **Oversight → Actions** as *not read*. In-scope URLs printed in a command's output are added to the map by a local scan that's always on. The Interpreter reads the rest, by sending each unread command and part of its output to the same model the Navigator uses.
+Spectra records every tool call, and reads most of them itself: it expands loops, variables and the scripts and wordlists inside your scope, scans command output for in-scope URLs, and reads the status lines that loops and scanners print. All of that is local and always on. What it still can't read — a script in another language that prints no results, a URL built from a value it couldn't resolve, a program it doesn't know — stays listed under **Oversight → Actions** as *not read*. The Interpreter reads those, by sending each unread command and part of its output to the same model the Navigator uses.
 
 1. In **Settings → Navigator**, save an API key if you haven't. The Interpreter uses that key and model; the Navigator itself doesn't have to be running.
 2. In **Settings → Interpreter**, set **Read** to **Actions Spectra can't read**.
@@ -220,7 +221,7 @@ To walk through it by hand, with the hub running and your scope set:
 4. **Violations are flagged.** Ask the agent to read a harmless file outside your scope paths. The node turns red, the badge shows *1 out of scope*, **Oversight → Scope** lists the violation (*med* for a read with the `Read` tool, *high* if the agent used the shell), and a desktop alert appears.
 5. **MCP tools work** (if registered). Ask the agent to call `log_thought`; the note appears in the stream.
 6. **The Navigator answers** (if it's on). **Oversight → Navigator** fills with leads, and Settings shows *N assessments · last …*. The line `[navigator] posted N assessment(s) for session …` appears in the hub's terminal when it runs in the hub, or in its own terminal under `npm run validator`.
-7. **Actions are accounted for.** Ask the agent to run a script or a scanner. **Oversight → Actions** lists it as *Not read* with the reason, and the Oversight header shows *· 1 not read*. Dismiss it — or, with the Interpreter on, watch it turn to *Interpreted* or *Nothing to map* a few seconds after the command returns.
+7. **Actions are accounted for.** Ask the agent to fetch a page of the target through `python3` and print only its length. **Oversight → Actions** lists the call as *Not read* with the reason *Runs code through python3…*, and the Oversight header shows *· 1 not read*. Dismiss it — or, with the Interpreter on, watch it turn to *Interpreted* or *Nothing to map* a few seconds after the command returns. A shell script or a scanner is a different check: when its output has status lines Spectra can read, the row turns to *Read* by itself, and that's fine too.
 8. **The audit log verifies.** The footer reads *Audit log verified · N events · head …*. From a terminal:
 
    ```bash

@@ -30,6 +30,8 @@ function ThoughtStream({ state, onSelect }: { state: GraphState; onSelect: (id: 
   // TODO: smarter filter for "task switch" moments (e.g. category changes between tool calls).
   const items = state.timeline.filter((e) => e.type === "thought" || e.type === "tool.call").slice(-120).reverse();
   const flagged = new Set(state.violations.map((v) => v.toolUseId));
+  // Calls Claude Code denied or blocked before they ran.
+  const neverRan = new Set(state.timeline.flatMap((e) => (e.type === "tool.result" && e.ran === false ? [e.toolUseId] : [])));
   return (
     <ol className="stream">
       {items.map((e, i) => (
@@ -43,9 +45,20 @@ function ThoughtStream({ state, onSelect }: { state: GraphState; onSelect: (id: 
           ) : e.type === "tool.call" ? (
             <p className="tool" onClick={() => e.nodeId && onSelect(e.nodeId)}>
               {flagged.has(e.toolUseId) && <span className="oob-tag">out of scope</span>}
-              {state.actions?.[e.toolUseId] && (
+              {neverRan.has(e.toolUseId) && (
+                <span className="unread-tag nothing" title="Claude Code denied or blocked this call before it ran, so nothing it names was reached">
+                  did not run
+                </span>
+              )}
+              {state.actions?.[e.toolUseId] && !neverRan.has(e.toolUseId) && (
                 <span className={`unread-tag ${isUnsettled(state.actions[e.toolUseId]) ? "open" : state.actions[e.toolUseId].resolution}`} title={state.actions[e.toolUseId].reason}>
-                  {state.actions[e.toolUseId].resolution === "interpreted" ? "interpreted" : isUnsettled(state.actions[e.toolUseId]) ? "not read" : "settled"}
+                  {state.actions[e.toolUseId].resolution === "interpreted"
+                    ? state.actions[e.toolUseId].resolvedBy === "hub"
+                      ? "read"
+                      : "interpreted"
+                    : isUnsettled(state.actions[e.toolUseId])
+                      ? "not read"
+                      : "settled"}
                 </span>
               )}
               <b>{formatTool(e.tool)}</b>

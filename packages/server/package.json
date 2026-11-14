@@ -11,7 +11,9 @@
     "import": "tsx src/import.ts",
     "demo": "tsx src/demo.ts",
     "demo:recon": "tsx src/demo-recon.ts",
-    "verify": "tsx src/verify.ts"
+    "verify": "tsx src/verify.ts",
+    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
+    "test:model": "tsx test/manual/real-model.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

@@ -113,11 +113,11 @@ Targets seen only in imported proxy history (*seen in proxy traffic*) crossed th
 
 ## Targets found in command output
 
-Targets with the property *seen in: command output* were read out of what a command printed — by the hub's local URL scan or by the Interpreter — and nobody has requested them directly. The digest describes them as *found in command output, not requested directly*, with the status code if the output gave one, and the prompt tells the Navigator to treat them as good leads held a little more loosely than traffic that was actually observed. Once the driver requests one, it's ordinary agent traffic.
+Targets with the property *seen in: command output* were read out of what a command printed — by the hub's local URL scan, from its result lines or by the Interpreter — and nobody has requested them directly. The digest describes them as *found in command output, not requested directly*, with the status code if the output gave one, and the prompt tells the Navigator to treat them as good leads held a little more loosely than traffic that was actually observed. Once the driver requests one, it's ordinary agent traffic.
 
 ## The Interpreter
 
-The second seat has one more job, with a switch of its own. The Interpreter reads the commands the hub couldn't — scripts, scanners, URLs built from variables — by giving a model the command and part of its output, and puts the hosts, endpoints and parameter names it finds on the map, marked as found in output.
+The second seat has one more job, with a switch of its own. The Interpreter reads the commands the hub couldn't read or settle from their output — a script in another language, a scanner whose output has no status lines, a URL built from a value it couldn't resolve — by giving a model the command and part of its output, and puts the hosts, endpoints and parameter names it finds on the map, marked as found in output.
 
 - **It shares the Navigator's key and model.** Whatever you save under **Navigator** in Settings — or the hub's `ANTHROPIC_API_KEY` and `SPECTRA_VALIDATOR_MODEL` — is what it uses.
 - **Its switch is separate.** Choose what it reads under **Interpreter** in Settings. It doesn't need **Run the Navigator in the hub** ticked, and turning the Navigator off doesn't turn it off.

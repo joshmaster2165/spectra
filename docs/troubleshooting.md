@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This page collects the failures you're most likely to hit, what each one looks like, and how to fix it: the hub not running or not reachable, hooks that don't fire, failed commands that stay active, scope that flags everything or nothing, proxy imports that find nothing in scope, the Navigator stopping or staying quiet, actions that stay unread and an Interpreter that reads nothing, and audit logs that fail verification. Most problems come down to three things — the hub isn't where a client expects it, a Claude Code session started before its hooks were installed, or the scope isn't what you think it is. Check those first.
+This page collects the failures you're most likely to hit, what each one looks like, and how to fix it: the hub not running or not reachable, hooks that don't fire, failed or denied commands that stay active, scope that flags everything or nothing, proxy imports that find nothing in scope, the Navigator stopping or staying quiet, actions that stay unread and an Interpreter that reads nothing, and audit logs that fail verification. Most problems come down to three things — the hub isn't where a client expects it, a Claude Code session started before its hooks were installed, or the scope isn't what you think it is. Check those first.
 
 ## Quick checks
 
@@ -80,6 +80,16 @@ npm run hooks:install -- /path/to/target-repo     # or: -- --user
 
 Re-running is safe: it replaces Spectra's entries rather than adding more. To confirm, open the settings file the installer names and check that `PostToolUseFailure` is listed under `hooks`. After the restart, a failed call shows *ERR* and its target goes back to **unmapped**. Targets that were already stuck stay active until the agent touches them again or the hub restarts.
 
+If targets stay active after calls that finished normally, the hub is running an older build: that was a bug, since fixed. Update Spectra and restart `npm start`.
+
+### A command Claude Code denied left its targets on the map
+
+Symptom: Claude Code refused a call — a permission rule, you saying no, its own check for unsafe commands — yet the hosts and endpoints the call named are on the map, **active**, as if they'd been reached.
+
+Claude Code sends `PreToolUse` before it decides, and a denied call gets no `PostToolUse` or `PostToolUseFailure`. Spectra learns that the call never ran from `PostToolBatch`, which hooks installed before Spectra registered that event don't deliver. Run the installer again, as above, and restart Claude Code. To confirm, check that `PostToolBatch` is listed under `hooks` in the settings file.
+
+After the restart, a denied call is tagged *did not run* in **Activity → Stream**, the targets only it had named come off the map, and its row under **Oversight → Actions**, if it had one, reads **Never ran**. A scope violation the attempt raised stays. On a Claude Code version that doesn't send `PostToolBatch`, such a call simply stays without a result. See [Interpreter → Calls that never ran](interpreter.md#calls-that-never-ran).
+
 ### The observer shows sessions you didn't expect
 
 The log observer reads every Claude Code transcript under `~/.claude/projects` that changes while the hub runs — not just your target's. Close unrelated sessions, or run the hub with `SPECTRA_OBSERVER=0` and rely on project hooks. Hooks installed with `--user` also report every project. When no scope paths are configured, every session's working directory is also added to the scope.
@@ -114,7 +124,8 @@ With the default session id, the hub attaches MCP annotations to the live Claude
 | Sessions stopped adding their working directory | You saved a scope from Settings, or posted `paths`. The scope then counts as set by you. | Add the directory to **Paths**. |
 | A subdomain isn't flagged | Hosts include their subdomains. | Expected. List exactly the hosts you're authorized for. |
 | A local service isn't flagged | Loopback is always in scope. | Expected. |
-| A shell command touched something but wasn't flagged | The path or host was built at runtime, is relative, or is under an ignored system prefix. | See [Security → Limits](security.md#limits). |
+| A shell command touched something but wasn't flagged | The path or host was built in a way the hub couldn't expand, is relative, or is under an ignored system prefix. | See [Security → Limits](security.md#limits). |
+| A violation is listed for a call that never ran | Claude Code denied the call, or it failed before making the request. The scope check runs on what the call names, as it arrives. | Expected. The attempt is worth seeing. |
 
 ## Proxy import
 
@@ -176,12 +187,22 @@ curl -s http://127.0.0.1:4317/health
 
 ### An action says Not read
 
-That's the normal state of a script, a scanner, a command whose URL comes from a variable, or a program Spectra doesn't know: the hub recorded it and can't tell what it touched. The row in **Oversight → Actions** gives the reason. It stays *Not read* until one of two things happens:
+The hub recorded the call and couldn't tell, from the call or its output, everything it touched: a script it couldn't open or one in another language, a scanner or a sweep whose output it couldn't read in full, a URL built from a value it couldn't resolve, a program it doesn't know. The row in **Oversight → Actions** gives the reason. It stays *Not read* until one of three things happens:
 
+- **Spectra reads its result lines.** When the output pairs statuses with addresses and every such line can be placed, the row turns to *Read* by itself. See [Interpreter → Result lines](interpreter.md#result-lines).
 - **You dismiss it.** Click **Dismiss** when nothing in it needs mapping — `docker ps`, a local script. **Dismiss all** settles every open one.
 - **The Interpreter reads it.** Turn it on in **Settings → Interpreter**. See [Interpreter](interpreter.md) for what that sends off your machine.
 
-If plain commands you'd expect Spectra to read are flagged, check the reason against [what Spectra can read on its own](interpreter.md#what-spectra-can-read-on-its-own). A `curl` with the URL written out is read; the same `curl` with `"$BASE/api"` isn't, unless `BASE=…` is assigned in the same command.
+If commands you'd expect Spectra to read are flagged, check the reason against [what Spectra can read on its own](interpreter.md#what-spectra-can-read-on-its-own):
+
+| Reason | Likely cause |
+|---|---|
+| *A URL is built from a value Spectra couldn't resolve*, or *curl was given a target Spectra couldn't resolve* | The value comes from something the hub can't know — another command's output, an environment variable set outside the command — or from a file it couldn't open. `curl "$BASE/api"` is read when `BASE=…` is assigned in the same command or in a script the hub read. |
+| *Runs a script …* or *Runs code through sh …* for a shell script | The hub couldn't open the script: it's outside the scope's directories, over 512 KB, on another machine from the hub, or `SPECTRA_READ_FILES=0` is set in the hub's environment. |
+| *Runs code through python3 …* | The code builds its addresses, or the hub couldn't read all of it. It stays *Not read* unless its output has result lines. Code whose addresses are all written out in full is read. |
+| *Works a page in a browser …*, and it stays open | The driver hasn't listed the browser's network requests since it last worked a page. Ask it to, or [import the proxy history](proxy-import.md) and dismiss the item. |
+| *A tool call with no target Spectra can read*, for a tool that never touches the target | It's an MCP tool the hub knows nothing about. Click **Local tool** on the row and its server's calls stop being listed. |
+| *Sweeps N addresses …*, still open after the command returned | The output had no status lines, some of them couldn't be tied to one address, or it was cut short. What was read is on the map. |
 
 ### Nothing is interpreted
 
@@ -193,8 +214,8 @@ The Interpreter is on, but actions stay *Not read*. It can only read an action w
 | Output forwarding is off | `SPECTRA_HOOK_OUTPUT=0` is set in the environment Claude Code runs in. | Unset it and start Claude Code again. |
 | The session reports through the log observer, not hooks | The **Claude Code hooks** row in the Setup checklist says *No hook events yet*. | Install the hooks and restart the session — see [Hooks aren't firing](#hooks-arent-firing). The observer doesn't carry output. |
 | The hub was restarted | The actions are from before the restart. `interpreter.waiting` in `GET /health` is `0`. | Output is held in memory only, so it's gone. Dismiss those actions; new ones will be read. |
-| The command ran in the background | The reason is *Runs in the background, so its output never reaches Spectra*. | What it prints later doesn't arrive under that call, so dismiss it if it stays open. Output the agent collects afterwards with `BashOutput` still gets the local URL scan. |
-| The command printed nothing | An action with no output is never queued. | Dismiss it. |
+| The command ran in the background | The reason is *Runs in the background; read when the driver checks its output*. | Its output arrives when the driver reads the task's output — the output file, `BashOutput` or `TaskOutput` — and is then read like any other. If the driver never reads it, or the hub was restarted in between, dismiss the action. |
+| The command printed nothing | An action with no output is never queued for the Interpreter. If it wrote its results to a file inside the scope (`>`, `tee`, a scanner's `-o`), the hub reads that file instead; otherwise there is nothing to read. | Dismiss it. |
 | More than 300 unread actions piled up while it was off | Only the newest 300 keep their output. | Dismiss the older ones. |
 | It's waiting its turn | Settings shows *N queued*. It reads up to five actions per request, at least four seconds apart. | Wait. |
 
@@ -202,7 +223,7 @@ The Interpreter is on, but actions stay *Not read*. It can only read an action w
 
 | State | Meaning |
 |---|---|
-| *Nothing to map* | The Interpreter read it and reported no targets, or every target it reported was dropped — out of scope, already on the map, or not shown by the output. *N left out* on the row counts the dropped ones. |
+| *Nothing to map* | The Interpreter read it and reported no targets, or every target it reported was dropped — out of scope, already on the map, or not shown by the output. *N left out* on the row counts the dropped ones. With a note that starts *Spectra:*, the hub read the result lines itself and no address answered. |
 | *Couldn't read* | Three model calls failed — rate limiting, a network problem, another API error — or the model declined to read it or left it out of its answer. The note says which. It still counts as not read: dismiss it, or change the key, model or mode in Settings, which restarts the Interpreter and reads it again while the hub still holds its output. |
 
 Neither is a statement that the command touched nothing. If the action matters, open it in **Target** and look at what the command did.
@@ -225,7 +246,9 @@ The key and model are the Navigator's, so fix them there and use **Test connecti
 |---|---|
 | A target shows **output** as its source and you can't find the request | There wasn't one. It was read out of a command's output by the local URL scan or the Interpreter. Open it in **Target**: *read by* says which, and the *found* edge leads to the command. |
 | A target the Interpreter added doesn't exist | The model read the output wrongly, or the output was written to mislead it. The checks keep such a target in scope and unmapped, not correct. See [What can still go wrong](interpreter.md#what-can-still-go-wrong). |
-| URLs a command printed aren't on the map | The local scan adds only absolute `http(s)` URLs on in-scope hosts, and nothing when no scope is set. Relative paths need the Interpreter. |
+| URLs a command printed aren't on the map | The local scan adds only absolute `http(s)` URLs on in-scope hosts, and nothing when no scope is set. Relative paths are read only from the result lines of an unread action, where a status is printed beside them; otherwise they need the Interpreter. |
+| Most of a wordlist isn't on the map | Expected. A sweep's addresses are mapped only when the output shows they answered; 404, 410, 421 and 000 stay off. The action's note gives the counts. |
+| A target shows **output** and *read by: result lines* | The hub read it from a status line in a command's output, and the command wasn't known to request it. The *evidence* property is the line. |
 | An out-of-scope URL in a command's output wasn't flagged | Expected. Printing a URL isn't contacting it, so it's ignored rather than flagged. |
 | `[interpreter] model call failed: …` in the hub's terminal | The reason follows. Fatal ones stop it (see above); anything else is retried after 30 seconds. |
 | **Dismiss** is missing | You're replaying a recorded session. Go **Back to live**. |
