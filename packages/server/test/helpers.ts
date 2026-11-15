@@ -58,7 +58,10 @@ export function run(cmd: string, args: string[], opts: { cwd?: string; input?: s
       clearTimeout(timer);
       resolve({ code: code ?? 1, stdout, stderr });
     });
-    p.stdin.end(opts.input ?? "");
+    // A command that exits before reading its input closes the pipe first; that isn't a failure.
+    p.stdin.on("error", () => {});
+    if (opts.input === undefined) p.stdin.end();
+    else p.stdin.end(opts.input);
   });
 }
 
