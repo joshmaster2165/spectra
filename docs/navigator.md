@@ -4,7 +4,7 @@ The Navigator is an optional second model that sits in the "second seat". Claude
 
 ## What it is
 
-<img src="media/navigator.webp" alt="The Navigator scoring the map: leads appear in the Navigator tab with their confidence, orange halos appear on the pursued targets in the graph, and verdicts appear on the findings" width="100%">
+<img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/navigator.webp" alt="The Navigator scoring the map: leads appear in the Navigator tab with their confidence, orange halos appear on the pursued targets in the graph, and verdicts appear on the findings" width="100%">
 
 <sub>The Navigator scoring the recon demo's map: leads with confidence, halos on the graph, verdicts on findings.</sub>
 

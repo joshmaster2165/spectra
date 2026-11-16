@@ -105,9 +105,9 @@ The story, in under a minute:
 
 ### The recon demo: `npm run demo:recon`
 
-<img src="media/demo.webp" alt="The recon demo: subdomains, live hosts, API routes, admin paths and JS-bundle routes fill the attack-surface graph; one production request turns red; findings, proxy history and Navigator leads follow" width="100%">
+<img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.webp" alt="The recon demo: subdomains, live hosts, API routes, admin paths and JS-bundle routes fill the attack-surface graph; one production request turns red; findings, proxy history and Navigator leads follow" width="100%">
 
-<sub>The recon demo as it runs. A <a href="media/demo.mp4">full-quality MP4</a> is also available.</sub>
+<sub>The recon demo as it runs. A <a href="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.mp4">full-quality MP4</a> is also available.</sub>
 
 ```bash
 npm run demo:recon
@@ -119,7 +119,7 @@ Set `SPECTRA_DEMO_PACE` below 1 to run it faster, for example `SPECTRA_DEMO_PACE
 
 ## What you're looking at
 
-![The Spectra dashboard after the short demo: the attack-surface graph with the out-of-scope production request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](media/dashboard.png)
+![The Spectra dashboard after the short demo: the attack-surface graph with the out-of-scope production request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](https://raw.githubusercontent.com/joshmaster2165/spectra/media/dashboard.png)
 
 | Area | What it shows |
 |---|---|

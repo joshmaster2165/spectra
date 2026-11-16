@@ -13,8 +13,8 @@
   <img alt="Runs locally" src="https://img.shields.io/badge/runs-locally-4b535d">
 </p>
 
-<p align="center"><img src="docs/media/demo.webp" alt="Spectra mapping a recon engagement: subdomain enumeration, live-host probing, API routes from an OpenAPI spec, admin content discovery and JS-bundle mining fill the attack-surface graph; one request to production lights up red; findings, proxy history and the Navigator's leads follow" width="100%"></p>
-<p align="center"><sub>A recon engagement against a fictional, authorized target — <code>npm run demo:recon</code> · <a href="docs/media/demo.mp4">full-quality MP4</a></sub></p>
+<p align="center"><img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.webp" alt="Spectra mapping a recon engagement: subdomain enumeration, live-host probing, API routes from an OpenAPI spec, admin content discovery and JS-bundle mining fill the attack-surface graph; one request to production lights up red; findings, proxy history and the Navigator's leads follow" width="100%"></p>
+<p align="center"><sub>A recon engagement against a fictional, authorized target — <code>npm run demo:recon</code> · <a href="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.mp4">full-quality MP4</a></sub></p>
 
 ---
 
@@ -47,7 +47,7 @@ npx github:joshmaster2165/spectra demo         # in a second terminal: a scripte
 npx github:joshmaster2165/spectra demo recon   # or the bigger one from the video: ~110 targets of recon
 ```
 
-That needs only Node.js 20 or later. The first run downloads and builds Spectra; after that it starts in about a second. To work on Spectra itself, clone it instead: see [Development](#development).
+That needs only Node.js 20 or later. The first run downloads and builds Spectra; after that it starts in a second or two (npx asks GitHub for the latest version each time). To work on Spectra itself, clone it instead: see [Development](#development).
 
 The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then it imports a proxy history that reveals endpoints the agent never touched. When you're ready for a real engagement, connect a project with one more command, then follow the [setup guide](docs/setup.md):
 
@@ -61,31 +61,31 @@ npx github:joshmaster2165/spectra init /path/to/target-repo   # installs the Cla
 
 ### Sort the attack surface as it comes in
 
-<p align="center"><img src="docs/media/surface.webp" alt="The Surface view filling with tagged endpoints as recon runs, newest first; then sorted by the Navigator's score, narrowed to the payments tag with the refund endpoint marked To test, filtered to admin routes, and switched to hosts sorted by endpoint count" width="100%"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/surface.webp" alt="The Surface view filling with tagged endpoints as recon runs, newest first; then sorted by the Navigator's score, narrowed to the payments tag with the refund endpoint marked To test, filtered to admin routes, and switched to hosts sorted by endpoint count" width="100%"></p>
 
 The **Surface** view is every endpoint, host or parameter as a live table, newest first so discoveries land on top. Each target is tagged automatically (`api`, `auth`, `admin`, `internal`, `payments`, `object-id`…), and you can sort by any column — the Navigator's score, your triage mark, status, source, request count. Mark targets **To test / Testing / Tested / Skip** as you go, then export the rows as CSV. [More →](docs/dashboard.md)
 
 ### Filter the map down to what matters
 
-<p align="center"><img src="docs/media/filters.webp" alt="Filtering the attack-surface graph: opening the filter bar, narrowing to auth surface, then admin and API routes, then scored leads only; hiding the agent's activity layer; searching for orders and seeing the same filter applied in the Surface table" width="100%"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/filters.webp" alt="Filtering the attack-surface graph: opening the filter bar, narrowing to auth surface, then admin and API routes, then scored leads only; hiding the agent's activity layer; searching for orders and seeing the same filter applied in the Surface table" width="100%"></p>
 
 One filter bar drives both the graph and the table: search, tags, status, scored leads, and your triage marks. Everything that doesn't match dims, matches stay connected to their hosts, and layers hide the agent's activity so only the attack surface is left. [More →](docs/dashboard.md)
 
 ### Let the Navigator point the way
 
-<p align="center"><img src="docs/media/navigator.webp" alt="The Navigator scoring a mapped attack surface: pursue, watch and skip leads arrive with confidence scores and rationale, its verdicts appear beside each finding, and the Surface table shows the scored leads sorted by promise" width="100%"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/navigator.webp" alt="The Navigator scoring a mapped attack surface: pursue, watch and skip leads arrive with confidence scores and rationale, its verdicts appear beside each finding, and the Surface table shows the scored leads sorted by promise" width="100%"></p>
 
 The **Navigator** is a second model in the second seat. It reads the map you see, scores where the bugs are likely to be — *pursue*, *watch* or *skip*, with a bug class, a 0–100% confidence and a one-line reason — and independently corroborates or challenges each finding. Advice only: it never touches the target or promotes anything out of scope. Turn it on from **Settings** with its own API key. [How it works →](docs/navigator.md)
 
 ### Walk the hierarchy
 
-<p align="center"><img src="docs/media/tree.webp" alt="The Tree view: collapsing categories and hosts, expanding a subdomain to its endpoints and parameters, selecting an exposed .git route and opening it in the Target view" width="100%"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/tree.webp" alt="The Tree view: collapsing categories and hosts, expanding a subdomain to its endpoints and parameters, selecting an exposed .git route and opening it in the Target view" width="100%"></p>
 
 The **Tree** view lays the same surface out as **domain → subdomain → endpoint → parameter**, with counts and status at every level. Collapse what you've covered, drill into what you haven't, and double-click anything to open it in **Target**. [More →](docs/dashboard.md)
 
 ## What you get
 
-![Spectra: the attack-surface graph for acme-shop.test with the out-of-scope production request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](docs/media/dashboard.png)
+![Spectra: the attack-surface graph for acme-shop.test with the out-of-scope production request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](https://raw.githubusercontent.com/joshmaster2165/spectra/media/dashboard.png)
 
 **Map the attack surface**
 - A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools — that keeps new discoveries in frame as it grows.
@@ -214,6 +214,8 @@ npm run typecheck
 npm test            # about a minute; runs real commands against a local lab app
 npm run build:dist  # build dist/, what the `spectra` command runs
 ```
+
+The screenshots and recordings in these docs aren't on `main`: they live on the [`media` branch](https://github.com/joshmaster2165/spectra/tree/media), so installing Spectra doesn't download them. To change one, check that branch out beside this one (`git worktree add ../spectra-media media`), replace the file and push.
 
 The tests run 64 recon techniques and a recorded Claude Code session against a lab app on your machine, and compare the map with what the lab actually received. Nothing leaves the machine and no API key is used. [Testing](docs/testing.md) explains each suite and how to add a case.
 

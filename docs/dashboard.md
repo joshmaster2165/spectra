@@ -2,7 +2,7 @@
 
 The dashboard at **http://127.0.0.1:4317** is a live view of the hub's state: one map built from everything the agent touched, everything it reported, and any proxy history you imported. This page tours every part of it — the top bar, tags, triage marks and the filter bar, the five views of the Attack Surface panel, Activity, Oversight, Chain and Coverage, replay, reports, Settings, desktop alerts and the footer — and explains what the colours and marks on the map mean. The dashboard is read-only toward the agent: nothing you do here sends anything to Claude Code.
 
-![The Spectra dashboard: the attack-surface graph with an out-of-scope request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](media/dashboard.png)
+![The Spectra dashboard: the attack-surface graph with an out-of-scope request in red, the activity stream, findings with Navigator verdicts, the attack chain and coverage](https://raw.githubusercontent.com/joshmaster2165/spectra/media/dashboard.png)
 
 ## Layout
 
@@ -130,7 +130,7 @@ A force-directed node-link map that grows as the agent works.
 | **Surface** / **Activity** | Show or hide a layer. See below. |
 | **Filter** | Open the [filter bar](#the-filter-bar). |
 
-<img src="media/filters.webp" alt="Filtering the Graph view: the filter bar opens, a tag chip is selected and every target without that tag fades while the matching endpoints stay lit and labelled under their hosts; then the Activity layer is switched off, leaving only hosts, endpoints and parameters" width="100%">
+<img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/filters.webp" alt="Filtering the Graph view: the filter bar opens, a tag chip is selected and every target without that tag fades while the matching endpoints stay lit and labelled under their hosts; then the Activity layer is switched off, leaving only hosts, endpoints and parameters" width="100%">
 
 <sub>Filtering the Graph by tag, then hiding the Activity layer.</sub>
 
@@ -167,7 +167,7 @@ Category nodes (`files`, `commands`, …) use their category's icon, the `hosts`
 
 ### Tree
 
-<img src="media/tree.webp" alt="The Tree view: expanding a session root into its categories, and the hosts category into domains, subdomains, endpoints and parameters, with status chips and an out-of-scope row in red" width="100%">
+<img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/tree.webp" alt="The Tree view: expanding a session root into its categories, and the hosts category into domains, subdomains, endpoints and parameters, with status chips and an out-of-scope row in red" width="100%">
 
 <sub>Walking the Tree view after the recon demo.</sub>
 
@@ -182,7 +182,7 @@ The same map as a collapsible outline: roots, then their categories, then leaves
 
 ### Surface
 
-<img src="media/surface.webp" alt="The Surface view: a sortable table of endpoints filling in as the recon demo runs, sorted and filtered by status and by Navigator lead" width="100%">
+<img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/surface.webp" alt="The Surface view: a sortable table of endpoints filling in as the recon demo runs, sorted and filtered by status and by Navigator lead" width="100%">
 
 <sub>Sorting and filtering the Surface table while the attack surface comes in.</sub>
 
@@ -298,7 +298,7 @@ The Navigator's leads, sorted pursue, watch, skip, then by confidence. Each show
 
 ### Actions
 
-![The dashboard with Oversight → Actions open: the Oversight header reads 1 violation · 2 not read, the tally reads 11 of 13 actions accounted for · 2 not read with a Dismiss all button, two rows marked Not read — a script and a scanner, each with its reason and a Dismiss button — sit above a row marked Interpreted with +4 on the map and 4 left out; the Activity stream tags the same calls not read and interpreted; and the Surface table, sorted by Source, shows endpoints found in command output with a dashed output chip beside the solid proxy and agent chips](media/actions.png)
+![The dashboard with Oversight → Actions open: the Oversight header reads 1 violation · 2 not read, the tally reads 11 of 13 actions accounted for · 2 not read with a Dismiss all button, two rows marked Not read — a script and a scanner, each with its reason and a Dismiss button — sit above a row marked Interpreted with +4 on the map and 4 left out; the Activity stream tags the same calls not read and interpreted; and the Surface table, sorted by Source, shows endpoints found in command output with a dashed output chip beside the solid proxy and agent chips](https://raw.githubusercontent.com/joshmaster2165/spectra/media/actions.png)
 
 Every tool call is recorded. This tab is the reconciliation: which of them Spectra couldn't read in full from the call itself — a script it couldn't open, a scanner or a sweep whose results are in its output, a URL built from a value it couldn't resolve — and how each was settled. [Interpreter](interpreter.md#what-spectra-can-read-on-its-own) explains what gets flagged and why.
 
@@ -372,7 +372,7 @@ The report ends with a note on how far to trust each part: agent-reported findin
 
 ## Settings
 
-![The Settings dialog: the Navigator section with a saved API key, the model, Test connection and the Run the Navigator in the hub checkbox; the Interpreter section with its state pill, the Read menu set to Actions Spectra can't read and a line saying what goes to the Anthropic API; the Scope editor with paths and hosts; the Engagement section with the New engagement button; and the Setup checklist with a status dot for each part, the Actions row flagged because two actions are unread](media/settings.png)
+![The Settings dialog: the Navigator section with a saved API key, the model, Test connection and the Run the Navigator in the hub checkbox; the Interpreter section with its state pill, the Read menu set to Actions Spectra can't read and a line saying what goes to the Anthropic API; the Scope editor with paths and hosts; the Engagement section with the New engagement button; and the Setup checklist with a status dot for each part, the Actions row flagged because two actions are unread](https://raw.githubusercontent.com/joshmaster2165/spectra/media/settings.png)
 
 **Settings** in the top bar opens a dialog with five sections: Navigator, Interpreter, Scope, Engagement and Setup. Close it with **Close**, Escape, or a click outside it. It always shows the live hub, even during replay, and refreshes every 3 seconds.
 
