@@ -102,6 +102,7 @@ The Graph and Surface views share one filter. Narrow the map in one view and the
 | **All / Unmapped / Active / Confirmed** | Targets with that [status](#reading-the-map). |
 | **Leads only** | Targets the Navigator has scored. |
 | Triage select | **Any triage**, **Not marked** (targets you haven't marked yet), or one mark: **To test**, **Testing**, **Tested**, **Skip**. |
+| Agent select | **Any agent**, **No subagent** (nothing a subagent touched), or one kind of subagent, such as **Subagent: Explore**. It appears once a subagent has touched something. See [Subagents](#subagents). |
 | Tag chips | Targets carrying **every** selected tag. Each chip shows how many hosts and endpoints carry the tag; only tags present on the map are offered. |
 | **Clear** | Resets everything. It appears once any filter is set. |
 
@@ -251,10 +252,24 @@ One target in detail. It shows the selected target, or the first session root if
 - Reasoning comes from the log observer (the agent's thinking and replies, up to 400 characters each), from your prompts via hooks (tagged *operator prompt*), from `log_thought`, and from proxy imports (tagged *proxy import*).
 - Tool calls show the tool and its main argument. Out-of-scope calls have a red bar and an *out of scope* tag.
 - A call Spectra couldn't read carries a dashed tag: *not read* while it's open, *read* once Spectra has put targets from its result lines on the map, *interpreted* once the Interpreter has, or *settled* when it was dismissed or had nothing to map. A call the Interpreter couldn't read stays *not read*. Hover the tag for the reason. See [Actions](#actions).
+- A call made by a subagent carries a tag with the subagent's kind, such as *Explore* or *general-purpose*. The main agent's calls have none. See [Subagents](#subagents).
 - A call Claude Code denied before it ran is tagged *did not run*, whether or not it was an unread action. See [Interpreter → Calls that never ran](interpreter.md#calls-that-never-ran).
 - Click a tool call to open its target.
 
 **Objects** lists every leaf on the map as a card with its category and importance. Sort by **Importance**, **Category** or **Status**; click a card to open it.
+
+### Subagents
+
+Claude Code often hands part of the work to a subagent: a second agent the main one starts with the `Agent` tool, for a search or a round of recon. Spectra maps what a subagent does exactly as it maps the main agent's work — same reading of commands and output, same scope checks, same audit log — and records which one did it.
+
+- **In the stream**, each of a subagent's tool calls is tagged with its kind. Hover the tag for the subagent's id, which tells two subagents of the same kind apart.
+- **On a target**, a command or a file, the **Target** view lists `subagents`: every kind of subagent whose calls reached it, ran it or opened it. A target the main agent also reached still shows the subagents. A target only the main agent reached has no such line.
+- **In the filter bar**, the agent select narrows the map and the Surface table to one kind of subagent's work, or to what no subagent touched.
+- **In Oversight → Actions**, an unread action a subagent made carries the same tag. What Spectra or the Interpreter later reads out of its output is credited to that subagent too.
+
+Subagents run under the session that started them, so they appear on that session's map, not as sessions of their own. The call that starts one is on the map under **Subagent**.
+
+Two limits. Spectra knows a subagent's kind and id, not the task it was given. And what a subagent adds through Spectra's own MCP tools (`map_target` and the rest) isn't labelled, because the MCP server isn't told who is calling.
 
 ## Oversight
 

@@ -1,6 +1,23 @@
 # Reference
 
-This page is the exact contract: the five MCP tools the agent can call and every parameter they take, every route on the hub's HTTP and WebSocket API with its method, body and response, the event types that flow through the hub, the node-id conventions that make different sources land on the same target, the rules behind the automatic surface tags, and the trust model — which source each event comes from and how much weight it carries. It's drawn from `packages/server/src/mcp.ts`, `packages/server/src/hub.ts` and `packages/schema/src/index.ts`. The [unread actions](interpreter.md) the hub keeps track of, and the Interpreter that reads them, have their own routes, events and source, listed here too.
+This page is the exact contract: the subcommands of the `spectra` command, the five MCP tools the agent can call and every parameter they take, every route on the hub's HTTP and WebSocket API with its method, body and response, the event types that flow through the hub, the node-id conventions that make different sources land on the same target, the rules behind the automatic surface tags, and the trust model — which source each event comes from and how much weight it carries. It's drawn from `packages/server/src/mcp.ts`, `packages/server/src/hub.ts` and `packages/schema/src/index.ts`. The [unread actions](interpreter.md) the hub keeps track of, and the Interpreter that reads them, have their own routes, events and source, listed here too.
+
+## The `spectra` command
+
+The installed command (`npx github:joshmaster2165/spectra`, built into `dist/` by `npm run build:dist`). Each subcommand runs the same program as the npm script beside it.
+
+| Command | What it does | From a checkout |
+|---|---|---|
+| `spectra`, `spectra start` | Starts the hub and serves the dashboard. Exits with a message if the port is taken. | `npm start` |
+| `spectra init [dir]` | Installs the hooks in `dir` (default: the current folder) and registers the MCP server through Claude Code's CLI, run in that folder. `--user` covers every project, `--no-mcp` skips the MCP server, `--remove` undoes both. | `npm run hooks:install`, `claude mcp add` |
+| `spectra demo [recon]` | Plays a scripted engagement into the running hub. | `npm run demo`, `npm run demo:recon` |
+| `spectra import <file.har>` | Puts a proxy history on the map. | `npm run import --` |
+| `spectra verify [session] [head]` | Checks the audit logs. | `npm run verify --` |
+| `spectra navigator` | Runs the Navigator as its own process. | `npm run validator` |
+| `spectra mcp` | The MCP server, over stdio. Claude Code starts it. | `npm run mcp` |
+| `spectra --version`, `spectra --help` | | |
+
+`spectra init` copies the hook script and the MCP server to `~/.spectra/bin` (`SPECTRA_HOME`), so Claude Code's settings never point into npm's cache. If Claude Code's CLI isn't on the path, it installs the hooks and prints the `claude mcp add` command for you to run.
 
 ## MCP tools
 
@@ -314,10 +331,11 @@ A Claude Code hook payload, as sent by `packages/server/bin/spectra-hook.mjs`:
 }
 ```
 
-`prompt` is included for `UserPromptSubmit` and `reason` for `SessionEnd`. Two more fields are sent when they apply:
+`prompt` is included for `UserPromptSubmit` and `reason` for `SessionEnd`. These fields are sent when they apply:
 
 | Field | Sent on | Value |
 |---|---|---|
+| `agent_id`, `agent_type` | Every event of a subagent's tool call | The subagent's id and kind, as Claude Code sets them. The main agent's events carry neither. The hub records them on the `tool.call`, on an unread action, and as `subagents` on every target the call puts on the map. |
 | `task` | The `PostToolUse` of a background command | The background task's id, so output read from that task later is credited to this call. |
 | `batch` | `PostToolBatch` | `[{ id, note }]`, one entry per call in the finished batch: its tool-use id, and the first 200 characters of what the model was shown as its result. |
 
@@ -521,7 +539,7 @@ Every event has `ts` (milliseconds since the epoch), `sessionId`, `source` and `
 | `edge.upsert` | `edge` | Hooks, observer, MCP, demos, the local URL scan, result lines, the Interpreter |
 | `chain.step` | `step` | MCP, demos |
 | `thought` | `text`, `reason?` | Hooks (prompts), observer (reasoning), MCP, proxy import |
-| `tool.call` | `toolUseId`, `tool`, `summary`, `nodeId?`, `targets?` | Hooks, observer, demos |
+| `tool.call` | `toolUseId`, `tool`, `summary`, `nodeId?`, `targets?`, `agent?` (`{ id, type? }`, a subagent's call) | Hooks, observer, demos |
 | `tool.result` | `toolUseId`, `ok`, `ran?` (`false`: Claude Code denied the call before it ran; `ok` is `false` too) | Hooks, observer |
 | `node.remove` | `nodeIds`, `reason?` (the nodes, and the edges that touch them, leave the map) | Hub only: the targets that only a call that never ran had put on the map |
 | `finding.upsert` | `finding` (merged by id) | MCP, demos |
@@ -530,7 +548,7 @@ Every event has `ts` (milliseconds since the epoch), `sessionId`, `source` and `
 | `finding.edit` | `findingId`, `edit` | Hub only |
 | `finding.review` | `findingId`, `review` | Hub only, from `POST /review` |
 | `target.triage` | `nodeId`, `triage` (`{ state, note?, ts }`, or `null` to clear the mark) | Hub only, from `POST /triage` |
-| `action.open` | `action` (`{ toolUseId, tool, summary, nodeId?, reason }`) | Hub only: written as a tool call arrives through hooks or the observer and can't be read, or by the hub itself when the Interpreter's `all` mode picks up a call's output |
+| `action.open` | `action` (`{ toolUseId, tool, summary, nodeId?, reason, agent? }`) | Hub only: written as a tool call arrives through hooks or the observer and can't be read, or by the hub itself when the Interpreter's `all` mode picks up a call's output |
 | `action.resolve` | `toolUseId`, `resolution` (`interpreted`, `nothing`, `dismissed` or `failed`), `note?`, `added?`, `ignored?` | Hub only: the hub's own reading of an action's result lines, a call that never ran, the Interpreter in the hub, or `POST /actions/resolve` |
 | `assessment.upsert` | `assessment` | Navigator only: the Navigator in the hub, or `POST /validator` |
 | `finding.assessment` | `findingId`, `assessment` | Navigator only: the Navigator in the hub, or `POST /validator` |

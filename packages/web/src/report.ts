@@ -1,5 +1,6 @@
 import { isUnsettled, SEVERITY_RANK, TRIAGE_LABEL, type AuditVerification, type GraphState, type Severity } from "@spectra/schema";
 import { STATUS_LABEL } from "./components/Status.tsx";
+import { CMD } from "./commands.ts";
 import { indexSurface } from "./filters.ts";
 import { formatTool } from "./format.ts";
 import { fetchVerification } from "./components/AuditStatus.tsx";
@@ -105,7 +106,7 @@ export function buildReport(state: GraphState, audit?: AuditVerification): strin
   if (audit?.ok && audit.head) {
     out.push(`The session's hash-chained log verified intact at report time: ${audit.events} events, head hash:`, "");
     out.push("```", audit.head, "```", "");
-    out.push(`Keep this hash with the report. To confirm later that the log hasn't been rewritten: \`npm run verify -- ${state.sessionId} ${audit.head}\``, "");
+    out.push(`Keep this hash with the report. To confirm later that the log hasn't been rewritten: \`${CMD.verify} ${state.sessionId} ${audit.head}\``, "");
   } else if (audit && !audit.ok) {
     out.push(`**Verification failed** at line ${audit.badLine ?? "?"}: ${audit.reason}.`, "");
   } else {

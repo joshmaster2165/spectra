@@ -11,6 +11,7 @@ import {
   type SimulationNodeDatum,
 } from "d3-force";
 import type { GraphState, MapNode } from "@spectra/schema";
+import { CMD } from "../commands.ts";
 import { FilterBar } from "../components/FilterBar.tsx";
 import { isFiltering, isSurface, matchedIds, type SurfaceFilter, type SurfaceIndex } from "../filters.ts";
 
@@ -198,7 +199,7 @@ export function GlobalMap({
     return () => svg.removeEventListener("wheel", onWheel);
   }, []);
 
-  if (!Object.keys(state.nodes).length) return <div className="empty">No surface mapped yet. Start an authorized testing session or run <code>npm run demo</code>.</div>;
+  if (!Object.keys(state.nodes).length) return <div className="empty">No surface mapped yet. Start an authorized testing session or run <code>{CMD.demo}</code>.</div>;
 
   const promising = new Set(
     Object.values(state.assessments)

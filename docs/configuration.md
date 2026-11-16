@@ -18,7 +18,7 @@ Spectra is configured with one optional file, `spectra.config.json`, which holds
 | `scope.paths` | array of strings | Directories the agent may touch. Everything beneath each one is in scope. Use absolute paths; `~` is expanded. |
 | `scope.hosts` | array of strings | Hostnames the agent may contact. Each includes its subdomains. Lowercased; no wildcards, no ports. |
 
-- **Location.** `spectra.config.json` in the root of the Spectra checkout (it's git-ignored). `SPECTRA_CONFIG` points the hub at another file. `spectra.config.example.json` is a template.
+- **Location.** `spectra.config.json` in the root of the Spectra checkout (it's git-ignored). `SPECTRA_CONFIG` points the hub at another file. `spectra.config.example.json` is a template. The installed `spectra` command has no checkout, so it looks in the folder it was started from, then for `~/.spectra/spectra.config.json`.
 - **When it's read.** Once, when the hub starts. To change the scope while the hub runs, use the scope editor in the dashboard's [Settings](dashboard.md#scope-editor) or [`POST /scope`](reference.md#post-scope). A scope set that way is kept with the [engagement](dashboard.md#engagement): it comes back when the hub restarts, unless this file sets paths, which always win at startup.
 - **Errors.** A missing file, or one that isn't valid JSON, is ignored without an error: the hub starts with no configured scope. Check the startup line `[spectra] scope: …`.
 - **No paths.** If no paths are configured, each session's working directory becomes the path scope as the session starts. Configured hosts are in scope from startup; with no hosts configured either, there is no scope at all until the first session starts. See [Setup → With no config, or hosts only](setup.md#with-no-config-or-hosts-only).
@@ -69,6 +69,7 @@ Change it through the dashboard, or [`POST /settings`](reference.md#post-setting
 |---|---|---|
 | `SPECTRA_PORT` | `4317` | Port for the hub and the dashboard. The hub always binds to `127.0.0.1`. |
 | `SPECTRA_CONFIG` | `spectra.config.json` in the Spectra root | Path to the scope config file. |
+| `SPECTRA_HOME` | `~/.spectra` | Spectra's own folder: the default place for the audit logs, the settings file and the copies `spectra init` installs in `bin`. |
 | `SPECTRA_SCOPE_PATHS` | | Comma-separated scope paths. When set, replaces the config file's `paths`. |
 | `SPECTRA_SCOPE_HOSTS` | | Comma-separated scope hosts. When set, replaces the config file's `hosts`. |
 | `SPECTRA_DATA_DIR` | `~/.spectra/sessions` | Where the hash-chained audit logs are written. Created with owner-only permissions. |
@@ -101,7 +102,7 @@ The last three only matter when the Navigator or the Interpreter runs in the hub
 
 The hook runs inside Claude Code, so it sees Claude Code's environment: set `SPECTRA_HUB` and `SPECTRA_HOOK_OUTPUT` in the shell you start Claude Code from. The MCP server is started by Claude Code too; give it variables when you register it, for example `claude mcp add spectra -e SPECTRA_HUB=http://127.0.0.1:4400 -- "$(pwd)/node_modules/.bin/tsx" "$(pwd)/packages/server/src/mcp.ts"`.
 
-`npm run verify` also reads `SPECTRA_DATA_DIR`, so set it the same way as for the hub.
+`npm run verify` also reads `SPECTRA_DATA_DIR` (and `SPECTRA_HOME`), so set it the same way as for the hub. So does `spectra init`, for where it puts the hook script: set `SPECTRA_HOME` the same way for both.
 
 ## Fixed limits
 

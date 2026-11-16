@@ -1,6 +1,7 @@
 import { useContext, useState } from "react";
-import { SEVERITY_RANK, isUnsettled, type ActionResolution, type Assessment, type Finding, type FindingAssessment, type GraphState, type OpaqueAction, type Review } from "@spectra/schema";
+import { SEVERITY_RANK, agentLabel, isUnsettled, type ActionResolution, type Assessment, type Finding, type FindingAssessment, type GraphState, type OpaqueAction, type Review } from "@spectra/schema";
 import { Segmented } from "../components/Panel.tsx";
+import { CMD } from "../commands.ts";
 import { Confidence } from "../components/Status.tsx";
 import { ReadOnly } from "../filters.ts";
 import { clock, formatTool } from "../format.ts";
@@ -55,7 +56,7 @@ function Navigator({ state, onSelect }: { state: GraphState; onSelect: (id: stri
   if (!leads.length)
     return (
       <div className="empty">
-        No leads yet. Turn the Navigator on in <strong>Settings</strong> (or run <code>npm run validator</code>) to have a second model score the map and point at what's worth pursuing.
+        No leads yet. Turn the Navigator on in <strong>Settings</strong> (or run <code>{CMD.navigator}</code>) to have a second model score the map and point at what's worth pursuing.
       </div>
     );
   return (
@@ -268,6 +269,11 @@ function Actions({ state, onSelect }: { state: GraphState; onSelect: (id: string
         )}
       </div>
       <p className="action-cmd" onClick={() => a.nodeId && onSelect(a.nodeId)} title="Open this action">
+        {a.agent && (
+          <span className="agent-tag" title={`Run by a subagent (${a.agent.id}), not the main agent`}>
+            {agentLabel(a.agent)}
+          </span>
+        )}
         <b>{formatTool(a.tool)}</b> {a.summary.slice(a.tool.length).trim()}
       </p>
       <p className="muted">

@@ -10,6 +10,7 @@ import {
   isUnsettled,
   HUB_ONLY_EVENTS,
   VALIDATOR_ONLY_EVENTS,
+  type AgentRef,
   type GraphState,
   type HttpEntry,
   type ImportSummary,
@@ -22,7 +23,7 @@ import {
   type SpectraEvent,
   type TriageState,
 } from "@spectra/schema";
-import { BROWSER_REASON, browserRole, surfaceIds, Translator, type CallReading, type ToolUse } from "./toolmap.ts";
+import { BROWSER_REASON, browserRole, markSubagent, surfaceIds, Translator, type CallReading, type ToolUse } from "./toolmap.ts";
 import { notRequested, PAGE_NOISE, readNetworkLog, readResults, resultFile } from "./results.ts";
 import { expand } from "./shell.ts";
 import { importEntries } from "./har.ts";
@@ -53,6 +54,8 @@ export interface HubOptions {
   observer?: boolean;
   /** false starts a new engagement instead of restoring the last one. */
   resume?: boolean;
+  /** Running as the installed `spectra` command, so the dashboard shows `spectra …` commands, not `npm run …`. */
+  installed?: boolean;
 }
 
 const VERDICTS = ["verified", "rejected", "needs-info"];
@@ -116,6 +119,10 @@ export class Hub {
   restored: { events: number; sessions: number } | null = null;
   /** The event that put the current scope in force; repeated at the start of each session's log. */
   private scopeEvent?: SpectraEvent;
+  /** The subagent behind each tool call that had one, for output read after the call has returned. */
+  private callAgents = new Map<string, AgentRef>();
+  /** The subagent whose hook event is being handled right now; what it puts on the map is marked as its own. */
+  private actingAgent?: AgentRef;
   private settings: SettingsStore;
   /** The Navigator, when it's turned on in Settings and has a key. */
   private navigator?: Navigator;
@@ -232,6 +239,7 @@ export class Hub {
     this.callNodes.clear();
     this.callTouch.clear();
     this.callCommands.clear();
+    this.callAgents.clear();
     this.bgTasks.clear();
     this.configureInterpreter(); // drops anything queued for the old map
     this.restored = null;
@@ -251,7 +259,17 @@ export class Hub {
   }
 
   listen(port: number, host = "127.0.0.1") {
-    return new Promise<void>((resolve) => this.server.listen(port, host, () => resolve()));
+    return new Promise<void>((resolve, reject) => {
+      // The WebSocket server repeats the HTTP server's error; one report is enough.
+      const repeated = () => {};
+      this.wss.on("error", repeated);
+      this.server.once("error", reject);
+      this.server.listen(port, host, () => {
+        this.server.off("error", reject);
+        this.wss.off("error", repeated);
+        resolve();
+      });
+    });
   }
 
   /** Entry point for every event, trusted or not. */
@@ -260,6 +278,8 @@ export class Hub {
     if (event.type === "finding.upsert" && !this.state.findings[event.finding.id]) {
       event = { ...event, finding: { ...event.finding, sessionId: event.sessionId } };
     }
+    // What a subagent's call reaches, runs or reveals is marked with the subagent: one place, so every path is covered.
+    event = markSubagent(event, this.actingAgent);
     // A bare status change when a call finishes isn't a new reach; a full node is.
     if (event.type === "node.upsert" && event.source === "hook" && event.node.kind) this.trackTouch(event.node.id);
     this.commit(event);
@@ -566,6 +586,16 @@ export class Hub {
   }
 
   ingestHook(p: any) {
+    // Claude Code tags a subagent's events with its id; everything this event leads to is that subagent's.
+    this.actingAgent = typeof p?.agent_id === "string" && p.agent_id ? { id: p.agent_id, ...(typeof p.agent_type === "string" && p.agent_type ? { type: p.agent_type } : {}) } : undefined;
+    try {
+      this.handleHook(p);
+    } finally {
+      this.actingAgent = undefined;
+    }
+  }
+
+  private handleHook(p: any) {
     const sessionId: string | undefined = p?.session_id;
     if (!sessionId) return;
     this.hookSessions.add(sessionId);
@@ -583,10 +613,11 @@ export class Hub {
       case "PreToolUse": {
         if (this.seenToolCalls.has(toolUseId)) break;
         remember(this.callTouch, toolUseId, { fresh: [], prior: [] }, 400);
+        if (this.actingAgent) remember(this.callAgents, toolUseId, this.actingAgent, 2000);
         this.currentCall = toolUseId;
         let reading: CallReading;
         try {
-          reading = this.hooks.toolUse({ sessionId, cwd: p.cwd, id: toolUseId, name: p.tool_name, input: p.tool_input ?? {}, ts });
+          reading = this.hooks.toolUse({ sessionId, cwd: p.cwd, id: toolUseId, name: p.tool_name, input: p.tool_input ?? {}, ts, agent: this.actingAgent });
         } finally {
           this.currentCall = undefined;
         }
@@ -851,7 +882,13 @@ export class Hub {
     const { events, outOfScope } = inferred;
     // What the hub's own reading of the result lines already put on the map counts too.
     const added = inferred.added + (data?.added ?? 0);
-    for (const e of events) this.publish(e);
+    // The answer arrives long after the call: what it adds still belongs to the subagent that made the call.
+    this.actingAgent = this.callAgents.get(r.toolUseId) ?? action.agent;
+    try {
+      for (const e of events) this.publish(e);
+    } finally {
+      this.actingAgent = undefined;
+    }
     this.commit({
       ts: Date.now(),
       sessionId,
@@ -990,6 +1027,8 @@ export class Hub {
     let file = path.join(root, path.normalize(decodeURIComponent(pathname)).replace(/^([/\\]|\.\.)+/, ""));
     if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(root, "index.html");
     res.writeHead(200, { "content-type": MIME[path.extname(file)] ?? "application/octet-stream" });
+    // The page learns how Spectra was installed from an attribute, so the commands it suggests are the right ones.
+    if (this.opts.installed && path.basename(file) === "index.html") return void res.end(fs.readFileSync(file, "utf8").replace("<html", '<html data-install="command"'));
     fs.createReadStream(file).pipe(res);
   }
 

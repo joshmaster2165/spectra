@@ -1,5 +1,5 @@
 import { createContext } from "react";
-import { surfaceTags, type Assessment, type GraphState, type MapNode, type NodeStatus, type SurfaceTag, type TriageState } from "@spectra/schema";
+import { subagentsOf, surfaceTags, type Assessment, type GraphState, type MapNode, type NodeStatus, type SurfaceTag, type TriageState } from "@spectra/schema";
 
 /** One filter, shared by the Graph and Surface views, so narrowing the map narrows the table too. */
 export interface SurfaceFilter {
@@ -10,11 +10,13 @@ export interface SurfaceFilter {
   leadsOnly: boolean;
   /** "none" = targets you haven't marked yet. */
   triage: "all" | "none" | TriageState;
+  /** "all", "main" (nothing a subagent touched), or one subagent's name. */
+  agent: string;
 }
 
-export const NO_FILTER: SurfaceFilter = { query: "", tags: [], status: "all", leadsOnly: false, triage: "all" };
+export const NO_FILTER: SurfaceFilter = { query: "", tags: [], status: "all", leadsOnly: false, triage: "all", agent: "all" };
 
-export const isFiltering = (f: SurfaceFilter) => !!(f.query.trim() || f.tags.length || f.status !== "all" || f.leadsOnly || f.triage !== "all");
+export const isFiltering = (f: SurfaceFilter) => !!(f.query.trim() || f.tags.length || f.status !== "all" || f.leadsOnly || f.triage !== "all" || f.agent !== "all");
 
 /** The categories that are the attack surface itself; everything else is the agent's activity. */
 export const SURFACE_CATEGORIES = new Set(["hosts", "endpoints", "params"]);
@@ -28,6 +30,8 @@ export interface SurfaceIndex {
   /** How many hosts and endpoints carry each tag. */
   tagCounts: Map<SurfaceTag, number>;
   counts: { hosts: number; endpoints: number; params: number; activity: number };
+  /** The subagents that touched anything on the map, by name. Empty when the main agent did all the work. */
+  agents: string[];
 }
 
 export function indexSurface(state: GraphState): SurfaceIndex {
@@ -36,8 +40,10 @@ export function indexSurface(state: GraphState): SurfaceIndex {
   const tagCounts = new Map<SurfaceTag, number>();
   const counts = { hosts: 0, endpoints: 0, params: 0, activity: 0 };
   const label = (id?: string) => (id ? state.nodes[id]?.label ?? "" : "");
+  const agents = new Set<string>();
 
   for (const n of Object.values(state.nodes)) {
+    for (const a of subagentsOf(n)) agents.add(a);
     if (n.category === "endpoints") {
       host.set(n.id, label(n.parentId));
       tags.set(n.id, surfaceTags(n.label, label(n.parentId)));
@@ -65,7 +71,7 @@ export function indexSurface(state: GraphState): SurfaceIndex {
 
   const leads = new Map<string, Assessment>();
   for (const a of Object.values(state.assessments)) if (a.nodeId) leads.set(a.nodeId, a);
-  return { tags, leads, host, tagCounts, counts };
+  return { tags, leads, host, tagCounts, counts, agents: [...agents].sort() };
 }
 
 export function matches(n: MapNode, state: GraphState, index: SurfaceIndex, f: SurfaceFilter): boolean {
@@ -74,6 +80,10 @@ export function matches(n: MapNode, state: GraphState, index: SurfaceIndex, f: S
   if (f.triage !== "all") {
     const mark = state.triage[n.id]?.state;
     if (f.triage === "none" ? !!mark : mark !== f.triage) return false;
+  }
+  if (f.agent !== "all") {
+    const by = subagentsOf(n);
+    if (f.agent === "main" ? by.length > 0 : !by.includes(f.agent)) return false;
   }
   if (f.tags.length) {
     const own = index.tags.get(n.id) ?? [];

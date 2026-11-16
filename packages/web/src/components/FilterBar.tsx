@@ -33,6 +33,17 @@ export function FilterBar({ index, filter, onChange }: { index: SurfaceIndex; fi
           </option>
         ))}
       </select>
+      {(index.agents.length > 0 || filter.agent !== "all") && (
+        <select value={filter.agent} onChange={(e) => set({ agent: e.target.value })} aria-label="Filter by which agent touched it" title="Filter by which agent touched it">
+          <option value="all">Any agent</option>
+          <option value="main">No subagent</option>
+          {[...new Set([...index.agents, ...(filter.agent !== "all" && filter.agent !== "main" ? [filter.agent] : [])])].map((a) => (
+            <option key={a} value={a}>
+              Subagent: {a}
+            </option>
+          ))}
+        </select>
+      )}
       {isFiltering(filter) && (
         <button className="toggle clear" onClick={() => onChange(NO_FILTER)}>
           Clear

@@ -32,6 +32,8 @@ All of them live in [`packages/server/test`](../packages/server/test).
 | `replay.test.ts` | The tool calls of one real Claude Code session, replayed in order, including the calls Claude Code denied. |
 | `interpreter.test.ts` | What the hub sends to a model and what it accepts back, against a local stand-in for the API. |
 | `persistence.test.ts` | A clean restart, a hard kill, a new engagement and `SPECTRA_RESUME=0`. |
+| `observer.test.ts` | The fallback that reads Claude Code's session logs, including a subagent's separate log. |
+| `cli.test.ts` | The installed `spectra` command. It builds and packs the package, unpacks the tarball into an empty folder with its own home directory, and runs everything from there: the hub and dashboard, `init` (with a stand-in for Claude Code's CLI), the copied hook and MCP server, the demo and `verify`. |
 
 To run one file, or one case by name:
 
@@ -55,7 +57,9 @@ For each case the test runs the command for real, sends the hook events Claude C
 
 Each case starts from an empty map, so an earlier case can't cover for a later one.
 
-Two cases are expected to end as *Not read*, and the suite checks that they are exactly those two: a browser page whose network log is never listed, and an MCP tool whose input names no address. They are the known limits described in [Interpreter](interpreter.md#what-still-isnt-read). If you remove one of those limits, its case will fail and tell you to update it.
+The suite also runs each kind of call as a subagent would make it, and three agents at once with their results arriving out of order: every target must carry the name of the subagent that reached it, and nothing the main agent did may carry one.
+
+Three cases are expected to end as *Not read*, and the suite checks that they are exactly those three: a browser page whose network log is never listed, and an MCP tool whose input names no address (once from the main agent, once from a subagent). They are the known limits described in [Interpreter](interpreter.md#what-still-isnt-read). If you remove one of those limits, its case will fail and tell you to update it.
 
 ## The model stand-in
 

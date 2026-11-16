@@ -42,14 +42,18 @@ flowchart LR
 ## Quick start
 
 ```bash
-git clone https://github.com/joshmaster2165/spectra.git
-cd spectra && npm install
-npm start          # dashboard on http://127.0.0.1:4317
-npm run demo       # in a second terminal: a scripted engagement against acme-shop.test
-npm run demo:recon # or the bigger one from the video: ~110 targets of recon
+npx github:joshmaster2165/spectra              # dashboard on http://127.0.0.1:4317
+npx github:joshmaster2165/spectra demo         # in a second terminal: a scripted engagement against acme-shop.test
+npx github:joshmaster2165/spectra demo recon   # or the bigger one from the video: ~110 targets of recon
 ```
 
-The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then it imports a proxy history that reveals endpoints the agent never touched. When you're ready for a real engagement, follow the [setup guide](docs/setup.md).
+That needs only Node.js 20 or later. The first run downloads and builds Spectra; after that it starts in about a second. To work on Spectra itself, clone it instead: see [Development](#development).
+
+The demo authorizes `acme-shop.test`, maps its API, confirms an IDOR in the cart, links the fix, and strays once to production — which lights up red. Then it imports a proxy history that reveals endpoints the agent never touched. When you're ready for a real engagement, connect a project with one more command, then follow the [setup guide](docs/setup.md):
+
+```bash
+npx github:joshmaster2165/spectra init /path/to/target-repo   # installs the Claude Code hooks and the MCP tools
+```
 
 **Documentation:** [Getting started](docs/getting-started.md) · [Setup guide](docs/setup.md) · [Dashboard tour](docs/dashboard.md) · [The Navigator](docs/navigator.md) · [The Interpreter](docs/interpreter.md) · [Proxy import](docs/proxy-import.md) · [Reference](docs/reference.md) · [Configuration](docs/configuration.md) · [Security model](docs/security.md) · [Troubleshooting](docs/troubleshooting.md) · [Testing](docs/testing.md)
 
@@ -87,6 +91,7 @@ The **Tree** view lays the same surface out as **domain → subdomain → endpoi
 - A zoomable, pannable graph of everything the agent touched, with an icon per target type — domains, subdomains, endpoints, parameters, files, searches, shell commands, MCP tools — that keeps new discoveries in frame as it grows.
 - Every URL becomes a **domain → subdomain → endpoint** tree; numeric IDs, UUIDs, hashes and tokens collapse to `:id` / `:token`, so you see the API's shape, not ten thousand one-off URLs.
 - A sortable **Surface** table and a collapsible **Tree** of the same map, with automatic tags and one filter bar shared with the graph.
+- **Subagents included.** When Claude Code hands recon to a subagent, its calls are mapped and scope-checked like the main agent's and labelled with the subagent, so you can filter the map to what each one did. [More →](docs/dashboard.md#subagents)
 - **Read what commands did and found.** Spectra expands the loops, variables, scripts and wordlists a command uses and reads the status lines it prints — locally, with no model — so a sweep puts the addresses that answered on the map and leaves the 404s off. In-scope URLs printed in output are added too, marked as found in output, not as traffic. The optional **Interpreter** has a second model read what's left. [More →](docs/interpreter.md)
 - **Import proxy history** (HAR from browser DevTools or any proxy that exports it). Traffic merges onto the same map, and surface the agent never touched shows up as *unmapped* — a ready-made to-do list.
 - Code-review coverage: every in-scope file marked read, edited or **never opened**.
@@ -128,6 +133,8 @@ They're complementary: run the agent through your proxy, watch it in Spectra, th
 ## Setup in brief
 
 **Requirements:** Node.js 20+, Claude Code, macOS or Linux (Windows through WSL). The [setup guide](docs/setup.md) covers every step in full, and **Settings → Setup** in the dashboard shows what's connected.
+
+The commands below are for a checkout of this repository. With the `npx` command from the quick start, `init /path/to/target-repo` does steps 2 and 3 in one go, and [Getting started](docs/getting-started.md#which-command-is-which) lists the rest.
 
 1. **Set your scope** — the folders and hosts you're authorized to test. Hosts include their subdomains; loopback is always in scope.
    ```bash
@@ -199,9 +206,13 @@ Spectra is for testing you're **authorized** to do — your own code, a contract
 ## Development
 
 ```bash
+git clone https://github.com/joshmaster2165/spectra.git
+cd spectra && npm install
+npm start           # build the dashboard, then run the hub from source
 npm run dev         # hub with reload + Vite dashboard on http://localhost:5173
 npm run typecheck
 npm test            # about a minute; runs real commands against a local lab app
+npm run build:dist  # build dist/, what the `spectra` command runs
 ```
 
 The tests run 64 recon techniques and a recorded Claude Code session against a lab app on your machine, and compare the map with what the lab actually received. Nothing leaves the machine and no API key is used. [Testing](docs/testing.md) explains each suite and how to add a case.

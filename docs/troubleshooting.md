@@ -55,7 +55,7 @@ Symptoms: the agent works but nothing appears, or activity appears without your 
 
 1. **Restart the session.** Hooks load when a Claude Code session starts. Sessions already running when you installed them won't report.
 2. **Check where they're installed.** Project hooks go in `<project>/.claude/settings.local.json` and only apply to sessions started in that project. Open the file and look for `spectra-hook.mjs` under `hooks`. Use `--user` to cover every project.
-3. **Moved or re-cloned Spectra?** The hook command holds an absolute path to `packages/server/bin/spectra-hook.mjs`. Run `npm run hooks:install` again.
+3. **Moved or re-cloned Spectra?** The hook command holds an absolute path to `packages/server/bin/spectra-hook.mjs`. Run `npm run hooks:install` again. (Installed with `spectra init`, the path is `~/.spectra/bin/spectra-hook.mjs`; run `spectra init` again if that file is gone.)
 4. **Is `node` on the path Claude Code uses?** The hook runs as `node "<path>/spectra-hook.mjs"`.
 5. **Test the hook by hand** from the Spectra root (this records a small session named `hook-test` in the audit log):
 

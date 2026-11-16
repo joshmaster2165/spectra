@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { subagentsOf } from "@spectra/schema";
 import { startLab, type Lab } from "./lab/app.ts";
 import { copyLabProject, freePort, missingPrograms, nodeIdOf, onMap, run, settled, sleep, startHub, tempDir, truthOf, type LabProject, type TestHub } from "./helpers.ts";
 
@@ -42,6 +43,8 @@ interface Case {
   expect?: Verdict;
   /** Probes that weren't there but are mapped anyway: a small hand-written loop is mapped up front. */
   deadMapped?: number;
+  /** The call is made by a subagent: Claude Code tags every hook event of the call with its id and kind. */
+  agent?: { id: string; type: string };
 }
 
 const NEEDS = ["zsh", "curl", "jq", "python3", "nc"];
@@ -70,11 +73,14 @@ describe("capture, end to end", { skip: missing.length ? `needs ${missing.join("
     await lab?.stop();
   });
 
-  const hook = (payload: object) => hub.hook({ session_id: SID, cwd: proj.dir, ...payload });
+  /** Who is making the calls right now: empty for the main agent. */
+  let who: { agent_id?: string; agent_type?: string } = {};
+  const hook = (payload: object) => hub.hook({ session_id: SID, cwd: proj.dir, ...who, ...payload });
 
   /** Runs one case the way Claude Code would, and checks the map against what the lab received. */
   async function check(c: Case) {
     const id = `c${++n}`;
+    who = c.agent ? { agent_id: c.agent.id, agent_type: c.agent.type } : {};
     // Each case starts from an empty map, so nothing an earlier case mapped can cover for it.
     await hub.post("/engagement/new", {});
     for (const [rel, content] of Object.entries(c.files ?? {})) {
@@ -140,6 +146,14 @@ describe("capture, end to end", { skip: missing.length ? `needs ${missing.join("
     assert.equal(deadOn.length, c.deadMapped ?? 0, `${where}: probes that weren't there are on the map: ${deadOn.join("  ")}`);
     // A finished call leaves no target marked as still being worked on.
     assert.deepEqual(fresh.filter((k) => state.nodes[k].status === "active"), [], `${where}: targets left "active"`);
+
+    // A subagent's call is recorded as its own, and so is everything the call put on the map. Nobody else's is.
+    const recorded = state.timeline.find((e: any) => e.type === "tool.call" && e.toolUseId === id);
+    assert.deepEqual(recorded?.agent, c.agent, `${where}: who made the call`);
+    const marked = fresh.filter((k) => subagentsOf(state.nodes[k]).length > 0);
+    if (c.agent) assert.deepEqual(fresh.filter((k) => !subagentsOf(state.nodes[k]).includes(c.agent!.type)), [], `${where}: on the map without the subagent's name`);
+    else assert.deepEqual(marked, [], `${where}: marked as a subagent's, but the main agent made the call`);
+    if (action) assert.deepEqual(action.agent, c.agent, `${where}: who made the unread call`);
 
     const expect = c.expect ?? "mapped";
     if (expect === "violation") {
@@ -299,7 +313,54 @@ describe("capture, end to end", { skip: missing.length ? `needs ${missing.join("
     { name: "an out-of-scope host", cmd: `curl -s https://partner-api.example.net/v2/track`, noexec: true, expect: "violation" },
   ]);
 
-  it("exactly the two known limits are left listed as not read", () => {
-    assert.deepEqual(open, ["a browser page whose network log is never listed", "an MCP tool with no address in its input"]);
+  const EXPLORE = { id: "agent-explore-1", type: "Explore" };
+  const GENERAL = { id: "agent-general-1", type: "general-purpose" };
+  group("subagents", (): Case[] => [
+    { name: "a subagent's request", agent: EXPLORE, cmd: `curl -s "${SHOP}/search?q=mug"` },
+    { name: "a subagent's sweep, read from its output", agent: EXPLORE, cmd: `for p in $(cat wordlists/paths.txt); do echo "$p $(curl -s -o /dev/null -w '%{http_code}' ${STG}/$p)"; done` },
+    { name: "a subagent's script, read from its output", agent: GENERAL, cmd: `python3 check.py` },
+    { name: "a subagent's background command", agent: GENERAL, cmd: `for p in login search; do curl -s -o /dev/null -w "%{http_code} $p\\n" ${SHOP}/$p; done`, background: true },
+    { name: "a subagent's WebFetch", agent: EXPLORE, tool: "WebFetch", input: { url: `${SHOP}/help/contact`, prompt: "What fields does the form have?" }, effect: `curl -s ${SHOP}/help/contact` },
+    { name: "a subagent's call that is denied", agent: EXPLORE, cmd: `curl -s ${SHOP}/never-requested-three`, denied: true, expect: "clean" },
+    { name: "a subagent's MCP call that can't be read", agent: GENERAL, tool: "mcp__burp__send_to_repeater", input: { request_id: 15 }, effect: `curl -s ${API}/v1/payments/webhook -X POST`, expect: "flagged" },
+  ]);
+
+  it("three agents at once: each result goes to the call that made it", async () => {
+    who = {};
+    await hub.post("/engagement/new", {});
+    lab.clear();
+    const calls = [
+      { id: "par-main", who: {}, cmd: `curl -s ${ADMIN}/login` },
+      { id: "par-explore", who: { agent_id: EXPLORE.id, agent_type: EXPLORE.type }, cmd: `curl -s ${SHOP}/login; curl -s ${API}/openapi.json` },
+      // Its second request never leaves: nothing listens on port 1.
+      { id: "par-general", who: { agent_id: GENERAL.id, agent_type: GENERAL.type }, cmd: `curl -s ${API}/openapi.json; curl -sS http://staging.lab.localhost:1/admin` },
+    ];
+    const payload = (c: (typeof calls)[number]) => ({ ...c.who, tool_name: "Bash", tool_use_id: c.id, tool_input: { command: c.cmd } });
+    // All three start before any of them finishes…
+    for (const c of calls) await hook({ hook_event_name: "PreToolUse", ...payload(c) });
+    const results = await Promise.all(calls.map((c) => run("zsh", ["-c", c.cmd], { cwd: proj.dir, env: { PATH: proj.path } })));
+    // …and they come back in a different order.
+    for (const i of [2, 0, 1]) {
+      const [c, r] = [calls[i], results[i]];
+      if (r.code === 0) await hook({ hook_event_name: "PostToolUse", ...payload(c), tool_response: { stdout: r.stdout, stderr: r.stderr, interrupted: false, isImage: false } });
+      else await hook({ hook_event_name: "PostToolUseFailure", ...payload(c), error: `Exit code ${r.code}\n${r.stdout}${r.stderr}`, is_interrupt: false });
+      await hook({ hook_event_name: "PostToolBatch", ...c.who, tool_calls: [{ tool_name: "Bash", tool_use_id: c.id, tool_input: { command: c.cmd }, tool_response: r.stdout.slice(0, 200) }] });
+    }
+    await sleep(200);
+    const state = await hub.state();
+    const by = (id: string) => subagentsOf(state.nodes[id] ?? {});
+    for (const id of ["endpoint:admin.lab.localhost/login", "endpoint:shop.lab.localhost/login", "endpoint:api.lab.localhost/openapi.json"]) assert.ok(state.nodes[id], `${id} is not on the map`);
+    assert.deepEqual(by("endpoint:admin.lab.localhost/login"), [], "the main agent's request");
+    assert.deepEqual(by("endpoint:shop.lab.localhost/login"), ["Explore"]);
+    assert.deepEqual(by("endpoint:api.lab.localhost/openapi.json"), ["Explore", "general-purpose"], "reached by both subagents");
+    // The request that never left is taken off again, without disturbing the other calls' targets.
+    assert.ok(!state.nodes["endpoint:staging.lab.localhost/admin"], "an address that was never requested is on the map");
+    assert.deepEqual(Object.values(state.nodes).filter((x: any) => /^(endpoint|host|param):/.test(x.id) && x.status === "active").map((x: any) => x.id), []);
+    const agents = Object.fromEntries(state.timeline.filter((e: any) => e.type === "tool.call").map((e: any) => [e.toolUseId, e.agent?.type ?? "main"]));
+    assert.deepEqual(agents, { "par-main": "main", "par-explore": "Explore", "par-general": "general-purpose" });
+  });
+
+  it("exactly the known limits are left listed as not read", () => {
+    assert.deepEqual(open, ["a browser page whose network log is never listed", "an MCP tool with no address in its input", "a subagent's MCP call that can't be read"]);
   });
 });

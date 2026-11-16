@@ -1,7 +1,7 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { verifyFile } from "./audit.ts";
+import { DATA_DIR } from "./paths.ts";
 
 /**
  * Checks hash-chained audit logs.
@@ -12,7 +12,7 @@ import { verifyFile } from "./audit.ts";
  *
  * Exits 1 if any log fails.
  */
-const dir = process.env.SPECTRA_DATA_DIR ?? path.join(os.homedir(), ".spectra", "sessions");
+const dir = DATA_DIR;
 const [target, expectedHead] = process.argv.slice(2);
 
 const files = target

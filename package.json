@@ -5,6 +5,12 @@
   "description": "Live attack-surface map for authorized, agent-assisted bug hunting: recon graph, scope boundary, findings, a validator co-pilot and replay.",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "spectra": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
   "workspaces": [
     "packages/*"
   ],
@@ -23,6 +29,8 @@
     "test:model": "npm run test:model --workspace @spectra/server --",
     "typecheck": "tsc -p packages/server && tsc -p packages/web --noEmit",
     "build": "npm run build --workspace @spectra/web",
+    "build:dist": "node scripts/build-dist.mjs",
+    "prepare": "npm run build:dist",
     "verify": "npm run verify --workspace @spectra/server --"
   },
   "engines": {
@@ -31,5 +39,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/joshmaster2165/spectra.git"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

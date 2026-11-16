@@ -208,6 +208,44 @@ describe("a model that refuses", () => {
   });
 });
 
+describe("a subagent's unread action", () => {
+  let hub: TestHub;
+  const SID = "subagent";
+  let dir = "";
+  const agent = { id: "agent-explore-9", type: "Explore" };
+  let id = "";
+
+  before(async () => {
+    dir = tempDir("subagent-hub");
+    hub = await startHub({ dir, scope: { hosts: ["lab.localhost"] }, settings: { navigator: { apiKey: TEST_KEY }, interpreter: { mode: "unread" } }, modelUrl: stub.url });
+    const base = { session_id: SID, cwd: CWD, agent_id: agent.id, agent_type: agent.type, tool_name: "Bash", tool_use_id: "sub-1", tool_input: { command: `python3 crawl.py --base ${SHOP}` } };
+    await hub.post("/hooks", { hook_event_name: "SessionStart", session_id: SID, cwd: CWD });
+    await hub.post("/hooks", { hook_event_name: "PreToolUse", ...base });
+    // Prose, so the hub can't settle it and the Interpreter reads it some time after the call has returned.
+    await hub.post("/hooks", { hook_event_name: "PostToolUse", ...base, ok: true, output: "requested GET /subagent/found and it rendered a page" });
+    id = "sub-1";
+  });
+  after(() => hub?.stop());
+
+  it("is listed with the subagent that made it", async () => {
+    assert.deepEqual((await hub.state()).actions[id]?.agent, agent);
+  });
+
+  it("what the Interpreter reads from it later is still the subagent's", async () => {
+    const s = await waitForState(hub, (x) => !!x.actions[id]?.resolution);
+    assert.equal(s.actions[id].resolution, "interpreted", JSON.stringify(s.actions[id]));
+    assert.equal(s.nodes["endpoint:shop.lab.localhost/subagent/found"]?.meta?.subagents, "Explore");
+  });
+
+  it("and stays so across a restart", async () => {
+    await hub.stop();
+    hub = await startHub({ dir, modelUrl: stub.url });
+    const s = await hub.state();
+    assert.deepEqual(s.actions[id]?.agent, agent);
+    assert.equal(s.nodes["endpoint:shop.lab.localhost/subagent/found"]?.meta?.subagents, "Explore");
+  });
+});
+
 describe("Interpreter modes", () => {
   let hub: TestHub;
   const d = driver(() => hub, "modes");

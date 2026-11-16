@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { SpectraEvent } from "@spectra/schema";
-import { Translator } from "./toolmap.ts";
+import type { AgentRef, SpectraEvent } from "@spectra/schema";
+import { markSubagent, Translator } from "./toolmap.ts";
 
 /**
  * Log Observer: tails Claude Code's session transcripts and turns them
@@ -13,6 +13,9 @@ import { Translator } from "./toolmap.ts";
  * Each line is a record like
  *   { type: "assistant" | "user", sessionId, cwd, message: { content: [...] } }
  * where content blocks include `text`, `thinking`, `tool_use` and `tool_result`.
+ * A subagent's records are in a file of their own,
+ *   ~/.claude/projects/<project-slug>/<session-id>/subagents/agent-<id>.jsonl
+ * with the parent's sessionId and an `agentId`; its kind is in agent-<id>.meta.json.
  * The format is not a public API, so all parsing is defensive. Hooks are the
  * preferred source for tool calls; the observer still supplies reasoning text,
  * which hooks don't carry.
@@ -31,8 +34,24 @@ type Block = { type: string; [k: string]: any };
 export function startObserver(opts: ObserverOptions) {
   const dir = opts.dir ?? path.join(os.homedir(), ".claude", "projects");
   const offsets = new Map<string, number>();
-  const translator = new Translator("observer", opts.emit);
+  // The subagent whose record is being read; what the record maps is marked as that subagent's.
+  let acting: AgentRef | undefined;
+  const translator = new Translator("observer", (e) => opts.emit(markSubagent(e, acting)));
+  const agentTypes = new Map<string, string>();
   const startedAt = Date.now();
+
+  /** A subagent's kind ("Explore", "general-purpose"…), from the small file Claude Code writes beside its log. */
+  const agentType = (file: string): string | undefined => {
+    if (!agentTypes.has(file)) {
+      try {
+        const type = JSON.parse(fs.readFileSync(file.replace(/\.jsonl$/, ".meta.json"), "utf8")).agentType;
+        if (typeof type === "string" && type) agentTypes.set(file, type.slice(0, 80));
+      } catch {
+        // Not written yet, or not there: the subagent is shown without a kind, and this is tried again.
+      }
+    }
+    return agentTypes.get(file);
+  };
 
   const scan = () => {
     for (const file of listJsonl(dir)) {
@@ -58,12 +77,12 @@ export function startObserver(opts: ObserverOptions) {
       if (lastNl < 0) continue;
       offsets.set(file, from + Buffer.byteLength(chunk.slice(0, lastNl + 1)));
       for (const line of chunk.slice(0, lastNl).split("\n")) {
-        if (line.trim()) handleLine(line);
+        if (line.trim()) handleLine(line, file);
       }
     }
   };
 
-  const handleLine = (line: string) => {
+  const handleLine = (line: string, file: string) => {
     let rec: any;
     try {
       rec = JSON.parse(line);
@@ -76,12 +95,22 @@ export function startObserver(opts: ObserverOptions) {
     const ts = Date.parse(rec.timestamp) || Date.now();
     translator.session(sessionId, rec.cwd, ts);
 
+    const type = typeof rec.agentId === "string" && rec.agentId ? agentType(file) : undefined;
+    acting = typeof rec.agentId === "string" && rec.agentId ? { id: rec.agentId.slice(0, 80), ...(type ? { type } : {}) } : undefined;
+    try {
+      read(rec, sessionId, ts);
+    } finally {
+      acting = undefined;
+    }
+  };
+
+  const read = (rec: any, sessionId: string, ts: number) => {
     const content: Block[] = Array.isArray(rec.message?.content) ? rec.message.content : [];
     for (const block of content) {
       if (block.type === "thinking" || (block.type === "text" && rec.type === "assistant")) {
         translator.thought(sessionId, String(block.thinking ?? block.text ?? ""), ts);
       } else if (block.type === "tool_use") {
-        translator.toolUse({ sessionId, cwd: rec.cwd, id: block.id, name: block.name, input: block.input ?? {}, ts });
+        translator.toolUse({ sessionId, cwd: rec.cwd, id: block.id, name: block.name, input: block.input ?? {}, ts, agent: acting });
       } else if (block.type === "tool_result") {
         translator.toolResult(sessionId, block.tool_use_id, !block.is_error, ts);
       }

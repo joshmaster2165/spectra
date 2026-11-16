@@ -177,7 +177,8 @@ Two limits to know. The settings file is written even when the audit log is off 
 | `~/.spectra/sessions/_engagement.json` | The ids of the sessions on the live map, and when the engagement began. No activity data. | **New engagement** in Settings, or deleting the file. |
 | The hub's memory | The current map and up to 50,000 recent events, rebuilt from the engagement's audit logs when the hub starts. | **New engagement** in Settings (with the audit log off, restarting the hub). |
 | The hub's memory only | The forwarded output of unread actions, as capped by the hook, and their commands as expanded — which can include the text of scripts the hub read — for at most 300 actions. Never written to disk. | Each one goes when its action is read, interpreted or dismissed; all of them with **New engagement** in Settings or a hub restart. An action the Interpreter gave up on keeps its output until newer ones push it out. |
-| Claude Code's settings | The hook entries, in `.claude/settings.local.json` or `~/.claude/settings.json`. | `npm run hooks:install -- … --remove`. |
+| Claude Code's settings | The hook entries, in `.claude/settings.local.json` or `~/.claude/settings.json`. | `npm run hooks:install -- … --remove`, or `spectra init … --remove`. |
+| `~/.spectra/bin` | Only with the installed `spectra` command: copies of the hook script and the MCP server, which Claude Code runs. Program files, no engagement data. | Deleting the folder, after removing the hooks. |
 | Claude Code's MCP configuration | The `spectra` server entry. | `claude mcp remove spectra`. |
 | Your downloads folder | Reports you export. | You. |
 | The Anthropic API | The Navigator's digests, while it runs — in the hub or as a separate process. See [Navigator → Cost and egress](navigator.md#cost-and-egress). | Not running the Navigator. |

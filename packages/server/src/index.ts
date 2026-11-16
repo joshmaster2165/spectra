@@ -1,18 +1,13 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Hub } from "./hub.ts";
 import { startObserver } from "./observer.ts";
 import { loadScopeConfig } from "./scope.ts";
 import { createNotifier } from "./alerts.ts";
+import { BUNDLED, configFile, DATA_DIR, SETTINGS_FILE as SETTINGS, WEB_DIST } from "./paths.ts";
 
 const PORT = Number(process.env.SPECTRA_PORT ?? 4317);
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const CONFIG = process.env.SPECTRA_CONFIG ?? path.join(REPO_ROOT, "spectra.config.json");
-const DATA_DIR = process.env.SPECTRA_DATA_DIR ?? path.join(os.homedir(), ".spectra", "sessions");
-const WEB_DIST = path.join(REPO_ROOT, "packages", "web", "dist");
-const SETTINGS = process.env.SPECTRA_SETTINGS ?? path.join(os.homedir(), ".spectra", "settings.json");
+const CONFIG = configFile();
 const OBSERVER = process.env.SPECTRA_OBSERVER !== "0";
 
 const scope = loadScopeConfig(CONFIG);
@@ -24,8 +19,15 @@ const hub = new Hub({
   settingsFile: SETTINGS,
   observer: OBSERVER,
   resume: process.env.SPECTRA_RESUME !== "0",
+  installed: BUNDLED,
 });
-await hub.listen(PORT);
+try {
+  await hub.listen(PORT);
+} catch (err) {
+  if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
+  console.error(`[spectra] port ${PORT} is already in use. Is Spectra already running? Open http://127.0.0.1:${PORT}, or start this one on another port with SPECTRA_PORT.`);
+  process.exit(1);
+}
 
 console.log(`[spectra] hub on http://127.0.0.1:${PORT}`);
 if (fs.existsSync(WEB_DIST)) console.log(`[spectra] dashboard on http://127.0.0.1:${PORT}`);

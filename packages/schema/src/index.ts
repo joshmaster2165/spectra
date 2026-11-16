@@ -37,6 +37,25 @@ export const isUnsettled = (a: OpaqueAction) => !a.resolution || a.resolution ==
  * whose results are in its output, a URL built from a variable. Open until
  * something resolves it, so nothing the agent did goes silently unmapped.
  */
+/** A subagent: one the main agent started with the Agent (or Task) tool. The main agent has no AgentRef. */
+export interface AgentRef {
+  id: string;
+  /** What kind it is, as Claude Code names it: "general-purpose", "Explore"… */
+  type?: string;
+}
+
+/** The name a subagent is shown and filtered by. */
+export const agentLabel = (a: AgentRef) => a.type || "subagent";
+
+/** The meta key listing the subagents whose calls reached a target, or ran a command, or opened a file. */
+export const SUBAGENTS_META = "subagents";
+
+/** The subagents recorded on a node, as labels. Empty for a node only the main agent touched. */
+export function subagentsOf(node: { meta?: Record<string, unknown> }): string[] {
+  const v = node.meta?.[SUBAGENTS_META];
+  return typeof v === "string" && v ? v.split(", ") : [];
+}
+
 export interface OpaqueAction {
   toolUseId: string;
   sessionId: string;
@@ -47,6 +66,8 @@ export interface OpaqueAction {
   nodeId?: string;
   /** Why the hub couldn't read it. */
   reason: string;
+  /** The subagent that made the call; absent for the main agent. */
+  agent?: AgentRef;
   resolution?: ActionResolution;
   resolvedBy?: EventSource;
   resolvedTs?: number;
@@ -411,6 +432,8 @@ export type SpectraEvent =
       summary: string;
       nodeId?: string;
       targets?: Target[];
+      /** The subagent that made the call; absent for the main agent. */
+      agent?: AgentRef;
     })
   | (Base & { type: "tool.result"; toolUseId: string; ok: boolean; /** false: the call was denied or blocked and never ran. */ ran?: boolean })
   | (Base & { type: "node.remove"; nodeIds: string[]; reason?: string })
@@ -420,7 +443,7 @@ export type SpectraEvent =
   | (Base & { type: "finding.review"; findingId: string; review: Review })
   | (Base & { type: "finding.edit"; findingId: string; edit: FixEdit })
   | (Base & { type: "target.triage"; nodeId: string; triage: Triage | null })
-  | (Base & { type: "action.open"; action: Pick<OpaqueAction, "toolUseId" | "tool" | "summary" | "nodeId" | "reason"> })
+  | (Base & { type: "action.open"; action: Pick<OpaqueAction, "toolUseId" | "tool" | "summary" | "nodeId" | "reason" | "agent"> })
   | (Base & { type: "action.resolve"; toolUseId: string; resolution: ActionResolution; note?: string; added?: number; ignored?: number })
   | (Base & { type: "assessment.upsert"; assessment: Assessment })
   | (Base & { type: "finding.assessment"; findingId: string; assessment: FindingAssessment });
@@ -499,6 +522,10 @@ export function applyEvent(state: GraphState, e: SpectraEvent): GraphState {
       const node = { ...prev, ...e.node };
       // Merge properties rather than replace them, so traffic stats survive agent updates.
       if (prev?.meta && e.node.meta) node.meta = { ...prev.meta, ...e.node.meta };
+      // More than one subagent can reach the same target: keep them all.
+      if (prev && e.node.meta?.[SUBAGENTS_META] && subagentsOf(prev).length) {
+        node.meta = { ...node.meta, [SUBAGENTS_META]: [...new Set([...subagentsOf(prev), ...subagentsOf(e.node)])].sort().join(", ") };
+      }
       // Surface first read out of command output that the agent now requests itself is plain agent traffic.
       if (prev && node.meta?.["seen in"] === OUTPUT_SEEN_IN && (e.source === "hook" || e.source === "observer")) {
         const { "seen in": _seen, "read by": _reader, ...rest } = node.meta;

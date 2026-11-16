@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { parseHar, type SpectraEvent } from "@spectra/schema";
+import { EXAMPLE_HAR } from "./paths.ts";
 
 /**
  * Posts a scripted bug-hunting session to a running hub so the dashboard can
@@ -148,7 +149,7 @@ for (const step of script) {
 }
 
 // The operator's proxy history arrives — the same path as Import HAR and `npm run import`.
-const har = JSON.parse(fs.readFileSync(new URL("../../../examples/acme-shop.har", import.meta.url), "utf8"));
+const har = JSON.parse(fs.readFileSync(EXAMPLE_HAR, "utf8"));
 await fetch(`${HUB}/import`, {
   method: "POST",
   headers: { "content-type": "application/json" },

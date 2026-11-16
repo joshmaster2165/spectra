@@ -24,6 +24,7 @@ cp spectra.config.example.json spectra.config.json
 ```
 
 - The hub reads `spectra.config.json` from the root of the Spectra checkout when it starts. Point `SPECTRA_CONFIG` at another file to use that instead. Restart `npm start` after editing it.
+- Run with the [one command](getting-started.md#the-quick-way-one-command) instead of a checkout? There's no checkout to hold the file, so the hub looks for `spectra.config.json` in the folder you start it from, then for `~/.spectra/spectra.config.json`.
 - Use absolute paths. A leading `~` is expanded to your home directory; any other relative path is resolved against the hub's working directory (`packages/server` under `npm start`), which is rarely what you want.
 - If the file is missing or isn't valid JSON, the hub silently falls back to having no config. The startup line `[spectra] scope: …` tells you which paths it loaded; if it says *each session's working directory*, your paths weren't read.
 
@@ -75,7 +76,11 @@ Check what's in force on the dashboard: the scope badge in the top bar shows *N 
 
 ### Hooks (recommended)
 
-Hooks report every tool call the moment it happens. Install them for one project:
+Hooks report every tool call the moment it happens.
+
+> **Using the one command?** `spectra init /path/to/target-repo` installs the hooks and registers the MCP server from [step 3](#3-register-the-mcp-server-optional) together (`--user` for every project, `--no-mcp` for the hooks alone, `--remove` to undo). It copies the hook script and the MCP server to `~/.spectra/bin` and points Claude Code there, because `npx` keeps packages in a cache it may clear. Starting the hub refreshes those copies, so they stay in step with the version you run. The rest of this section describes the same hooks installed from a checkout.
+
+Install them for one project:
 
 ```bash
 npm run hooks:install -- /path/to/target-repo
@@ -128,6 +133,7 @@ Without hooks, Spectra still sees the agent: the hub tails Claude Code's session
 | | Hooks | Observer |
 |---|---|---|
 | Tool calls | Yes, as they happen | Yes, from the transcript |
+| Subagents' tool calls | Yes, labelled with the subagent | Yes, labelled, from the subagent's own log |
 | Agent reasoning | No | Yes |
 | Your prompts | Yes | No |
 | Setup | Install, restart sessions | None |
@@ -240,11 +246,11 @@ If any step fails, see [Troubleshooting](troubleshooting.md).
    npm run hooks:install -- --user --remove
    ```
 
-2. Remove the MCP server: `claude mcp remove spectra`.
+2. Remove the MCP server: `claude mcp remove spectra`. (With the one command, `spectra init /path/to/target-repo --remove` does steps 1 and 2.)
 3. Stop `npm start` and `npm run validator`.
 4. Delete the saved Navigator key and settings: `rm ~/.spectra/settings.json` (or your `SPECTRA_SETTINGS` file).
 5. Delete the audit logs if you don't need them as evidence: `rm -rf ~/.spectra/sessions` (or your `SPECTRA_DATA_DIR`). This can't be undone.
-6. Delete the Spectra checkout, including your `spectra.config.json`.
+6. Delete the Spectra checkout, including your `spectra.config.json`. If you used the one command instead, delete `~/.spectra/bin`; the copy `npx` downloaded is in npm's cache (`npm cache clean --force` clears all of it).
 
 ---
 

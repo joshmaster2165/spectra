@@ -69,6 +69,9 @@ async function main() {
     cwd: p.cwd,
     tool_name: p.tool_name,
     tool_use_id: p.tool_use_id,
+    // Set by Claude Code on a subagent's tool calls; the main agent's calls carry neither.
+    agent_id: typeof p.agent_id === "string" ? p.agent_id.slice(0, 80) : undefined,
+    agent_type: typeof p.agent_type === "string" ? p.agent_type.slice(0, 80) : undefined,
     tool_input: p.tool_name ? input : undefined,
     prompt: p.prompt,
     reason: p.reason,

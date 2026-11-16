@@ -13,11 +13,52 @@ This page gets Spectra running on your machine and shows you what it does before
 
 ## Install
 
+There are two ways to run Spectra. Both give you the same hub and dashboard.
+
+### The quick way: one command
+
+```bash
+npx github:joshmaster2165/spectra
+```
+
+This downloads Spectra, builds it once and starts the hub. The first run is slower because of the build; after that it starts in about a second. Nothing is added to your project and nothing is installed globally. The command is long, so you may want an alias:
+
+```bash
+alias spectra='npx github:joshmaster2165/spectra'
+```
+
+Two things to avoid:
+
+- **Don't run `npx spectra`.** That name on npm belongs to an unrelated package.
+- **`npm install -g` with the GitHub address doesn't work.** The install fails at the build step (checked with npm 11). Use `npx` as above.
+
+### From a checkout
+
+Clone the repository if you want to read or change Spectra's code:
+
 ```bash
 git clone https://github.com/joshmaster2165/spectra.git
 cd spectra
 npm install
 ```
+
+### Which command is which
+
+The rest of these pages show the checkout commands. If you run Spectra with the one command, use the right-hand column, with `spectra` standing for the `npx` command or your alias.
+
+| From a checkout | With the command |
+|---|---|
+| `npm start` | `spectra` |
+| `npm run hooks:install -- /path/to/target-repo` and `claude mcp add spectra …` | `spectra init /path/to/target-repo` (does both) |
+| `npm run hooks:install -- --user` | `spectra init --user` |
+| `npm run hooks:install -- … --remove` | `spectra init … --remove` |
+| `npm run demo` | `spectra demo` |
+| `npm run demo:recon` | `spectra demo recon` |
+| `npm run import -- file.har` | `spectra import file.har` |
+| `npm run verify` | `spectra verify` |
+| `npm run validator` | `spectra navigator` |
+
+`spectra --help` lists them. The dashboard also shows the commands for the way you're running it.
 
 ## Start the hub
 
@@ -25,7 +66,7 @@ npm install
 npm start
 ```
 
-`npm start` builds the dashboard, then starts the hub. You'll see something like:
+`npm start` builds the dashboard, then starts the hub (with the one command, the dashboard is already built). You'll see something like:
 
 ```
 [spectra] hub on http://127.0.0.1:4317

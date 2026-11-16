@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { BUNDLED } from "./paths.ts";
 import path from "node:path";
 import { addSummary, describeImport, emptySummary, parseHar, type ImportSummary } from "@spectra/schema";
 
@@ -17,7 +18,7 @@ const includeStatic = args.includes("--include-static");
 const files = args.filter((a) => !a.startsWith("--"));
 
 if (!files.length) {
-  console.error("usage: npm run import -- <file.har> [more.har ...] [--include-static]");
+  console.error(`usage: ${BUNDLED ? "spectra import" : "npm run import --"} <file.har> [more.har ...] [--include-static]`);
   process.exit(1);
 }
 
@@ -45,7 +46,7 @@ for (const file of files) {
         body: JSON.stringify({ entries: entries.slice(i, i + CHUNK), label: path.basename(file), includeStatic }),
       });
     } catch {
-      console.error(`Can't reach the hub at ${HUB}. Start it with npm start.`);
+      console.error(`Can't reach the hub at ${HUB}. Start it with ${BUNDLED ? "spectra start" : "npm start"}.`);
       process.exit(1);
     }
     if (!res.ok) {

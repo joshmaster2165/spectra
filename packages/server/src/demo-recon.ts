@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { parseHar, type SpectraEvent } from "@spectra/schema";
+import { EXAMPLE_HAR } from "./paths.ts";
 
 /**
  * A scripted recon engagement for the README video: the operator authorizes
@@ -157,7 +158,7 @@ if (RUN_MAP) {
   for (const id of [ep("admin", "/.git/HEAD"), ep("staging", "/debug/vars"), ep("api", "/v1/search"), ep("auth", "/authorize")]) await done(id, 120);
 
   // ── 10. Proxy history ─────────────────────────────────────────────────────
-  const har = JSON.parse(fs.readFileSync(new URL("../../../examples/acme-shop.har", import.meta.url), "utf8"));
+  const har = JSON.parse(fs.readFileSync(EXAMPLE_HAR, "utf8"));
   await fetch(`${HUB}/import`, {
     method: "POST",
     headers: { "content-type": "application/json" },

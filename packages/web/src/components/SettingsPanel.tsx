@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { GraphState } from "@spectra/schema";
 import { clock } from "../format.ts";
+import { CMD } from "../commands.ts";
 
 interface NavigatorView {
   enabled: boolean;
@@ -89,7 +90,7 @@ export function SettingsPanel({ state, onClose }: { state: GraphState; onClose: 
           </button>
         </header>
         <div className="modal-body">
-          {offline && <p className="alert-text">Can't reach the hub. Is `npm start` still running?</p>}
+          {offline && <p className="alert-text">Can't reach the hub. Is `{CMD.start}` still running?</p>}
           {nav && <NavigatorSettings nav={nav} onSaved={setNav} />}
           {nav && interp && <InterpreterSettings nav={nav} interp={interp} onSaved={setInterp} />}
           {localTools.length > 0 && <LocalTools tools={localTools} onSaved={setLocalTools} />}
@@ -370,7 +371,7 @@ function SetupChecklist({ health: h }: { health: Health }) {
       : {
           state: "todo",
           name: "Claude Code hooks",
-          detail: `No hook events yet. Run npm run hooks:install -- /path/to/project, then restart Claude Code.${h.observer.enabled ? " Until then, activity comes from Claude Code's session logs." : ""}`,
+          detail: `No hook events yet. Run ${CMD.hooks}, then restart Claude Code.${h.observer.enabled ? " Until then, activity comes from Claude Code's session logs." : ""}`,
         },
     h.mcp.lastSeen
       ? { state: "ok", name: "Agent annotations (MCP)", detail: `Last annotation ${ago(h.mcp.lastSeen)}` }

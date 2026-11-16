@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import type { AccessKind, EventSource, MapNode, NodeStatus, SpectraEvent, Target } from "@spectra/schema";
+import { agentLabel, SUBAGENTS_META, type AccessKind, type AgentRef, type EventSource, type MapNode, type NodeStatus, type SpectraEvent, type Target } from "@spectra/schema";
 import { expand, type Expansion, type ShellContext } from "./shell.ts";
 
 export { expandShell } from "./shell.ts";
@@ -53,6 +53,18 @@ export interface ToolUse {
   name: string;
   input: Input;
   ts: number;
+  /** The subagent that made the call; absent for the main agent. */
+  agent?: AgentRef;
+}
+
+/**
+ * Marks what a subagent's call reached, ran or revealed as that subagent's. Applied to every event
+ * produced while one of its calls is being handled, so no path onto the map is missed.
+ */
+export function markSubagent(e: SpectraEvent, agent?: AgentRef): SpectraEvent {
+  // Targets, commands and files — not the session and category headings they hang from. (A status-only update has no kind.)
+  if (!agent || e.type !== "node.upsert" || !e.node.kind || !(e.node.kind === "leaf" || /^(host|domain):/.test(e.node.id))) return e;
+  return { ...e, node: { ...e.node, meta: { ...e.node.meta, [SUBAGENTS_META]: agentLabel(agent) } } };
 }
 
 export class Translator {
@@ -116,10 +128,11 @@ export class Translator {
       summary: summarize(t.name, t.input),
       nodeId: leaf.id,
       targets,
+      ...(t.agent ? { agent: t.agent } : {}),
     });
     // Recorded either way; flagged when the hub can't tell what it touched.
     if (reading.reason) {
-      this.emit({ ...base, type: "action.open", action: { toolUseId: t.id, tool: t.name, summary: summarize(t.name, t.input), nodeId: leaf.id, reason: reading.reason } });
+      this.emit({ ...base, type: "action.open", action: { toolUseId: t.id, tool: t.name, summary: summarize(t.name, t.input), nodeId: leaf.id, reason: reading.reason, ...(t.agent ? { agent: t.agent } : {}) } });
     }
     return reading;
   }

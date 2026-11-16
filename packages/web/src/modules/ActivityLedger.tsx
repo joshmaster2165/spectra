@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { isUnsettled, type GraphState, type MapNode } from "@spectra/schema";
+import { agentLabel, isUnsettled, type GraphState, type MapNode } from "@spectra/schema";
 import { Segmented } from "../components/Panel.tsx";
 import { ImportanceBars } from "../components/Status.tsx";
 import { clock, formatTool } from "../format.ts";
@@ -59,6 +59,11 @@ function ThoughtStream({ state, onSelect }: { state: GraphState; onSelect: (id: 
                     : isUnsettled(state.actions[e.toolUseId])
                       ? "not read"
                       : "settled"}
+                </span>
+              )}
+              {e.agent && (
+                <span className="agent-tag" title={`Run by a subagent (${e.agent.id}), not the main agent`}>
+                  {agentLabel(e.agent)}
                 </span>
               )}
               <b>{formatTool(e.tool)}</b>
