@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { parseHar, type SpectraEvent } from "@spectra/schema";
+import { HUB, requireHub } from "./client.ts";
 import { EXAMPLE_HAR } from "./paths.ts";
 
 /**
@@ -15,7 +16,6 @@ import { EXAMPLE_HAR } from "./paths.ts";
  * and the Navigator scores it all.
  */
 
-const HUB = process.env.SPECTRA_HUB ?? "http://127.0.0.1:4317";
 const sessionId = `demo-${Date.now().toString(36)}`;
 const CWD = "/work/acme-shop";
 const API = "api.acme-shop.test";
@@ -131,6 +131,8 @@ const script: Step[] = [
   done(`${R}:searches`),
   done(`${R}:commands`),
 ];
+
+await requireHub();
 
 // The operator authorizes the test target (the demo plays the operator here).
 await fetch(`${HUB}/scope`, {

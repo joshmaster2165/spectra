@@ -42,8 +42,7 @@ Each client fails differently:
 | MCP server | The tools still report success to the agent. The server's stderr says `[spectra-mcp] hub unreachable: …`. |
 | `npm run validator` | `[navigator] socket error: …` and `[navigator] hub connection closed; retrying in 3s`, repeating until the hub is up. |
 | Settings dialog | *Can't reach the hub. Is `npm start` still running?* |
-| Importer | `Can't reach the hub at http://127.0.0.1:4317. Start it with npm start.` |
-| Demos | The script stops with a fetch error. |
+| Importer, demos | `Can't reach the hub at http://127.0.0.1:4317. Start it with npm start.` The command it names matches how you run Spectra. |
 
 Fixes: start the hub; make sure `SPECTRA_HUB` and `SPECTRA_PORT` agree; and use `127.0.0.1`, not `localhost`, in `SPECTRA_HUB` — the hub listens on IPv4 loopback only, and `localhost` can resolve to the IPv6 address first.
 

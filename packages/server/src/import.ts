@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { HUB, HUB_DOWN } from "./client.ts";
 import { BUNDLED } from "./paths.ts";
 import path from "node:path";
 import { addSummary, describeImport, emptySummary, parseHar, type ImportSummary } from "@spectra/schema";
@@ -11,7 +12,6 @@ import { addSummary, describeImport, emptySummary, parseHar, type ImportSummary 
  *   npm run import -- burp-history.har [more.har ...] [--include-static]
  */
 
-const HUB = process.env.SPECTRA_HUB ?? "http://127.0.0.1:4317";
 const CHUNK = 1500;
 const args = process.argv.slice(2);
 const includeStatic = args.includes("--include-static");
@@ -46,7 +46,7 @@ for (const file of files) {
         body: JSON.stringify({ entries: entries.slice(i, i + CHUNK), label: path.basename(file), includeStatic }),
       });
     } catch {
-      console.error(`Can't reach the hub at ${HUB}. Start it with ${BUNDLED ? "spectra start" : "npm start"}.`);
+      console.error(HUB_DOWN);
       process.exit(1);
     }
     if (!res.ok) {

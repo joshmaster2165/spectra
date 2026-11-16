@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { parseHar, type SpectraEvent } from "@spectra/schema";
+import { HUB, requireHub } from "./client.ts";
 import { EXAMPLE_HAR } from "./paths.ts";
 
 /**
@@ -15,7 +16,6 @@ import { EXAMPLE_HAR } from "./paths.ts";
  *   SPECTRA_DEMO_PHASES=navigator npm run demo:recon  # then the Navigator scoring it
  */
 
-const HUB = process.env.SPECTRA_HUB ?? "http://127.0.0.1:4317";
 const PACE = Number(process.env.SPECTRA_DEMO_PACE ?? 1); // <1 is faster
 const PHASES = process.env.SPECTRA_DEMO_PHASES ?? "all";
 const RUN_MAP = PHASES !== "navigator";
@@ -68,6 +68,8 @@ async function params(h: string, route: string, names: string[]) {
 async function finding(f: Record<string, unknown>) {
   await post({ type: "finding.upsert", finding: f } as Step, 700);
 }
+
+await requireHub();
 
 if (RUN_MAP) {
   // ── Scope: the operator authorizes the test domain ────────────────────────

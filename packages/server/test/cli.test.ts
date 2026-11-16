@@ -210,6 +210,15 @@ describe("the installed spectra command", () => {
     assert.equal(verify.code, 0, verify.stdout + verify.stderr);
   });
 
+  it("with no hub running, the demos and the importer say so plainly", async () => {
+    const nowhere = `http://127.0.0.1:${await freePort()}`;
+    for (const args of [["demo"], ["demo", "recon"], ["import", path.join(pkg, "dist", "examples", "acme-shop.har")]]) {
+      const r = await spectra(args, { SPECTRA_HUB: nowhere });
+      assert.equal(r.code, 1, args.join(" "));
+      assert.equal(r.stderr.trim(), `Can't reach the hub at ${nowhere}. Start it with spectra start.`, args.join(" "));
+    }
+  });
+
   it("without Claude Code's CLI, init says what to run", async () => {
     const other = tempDir("other-repo");
     const empty = tempDir("empty-path");
