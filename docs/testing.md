@@ -32,6 +32,7 @@ All of them live in [`packages/server/test`](../packages/server/test).
 | `replay.test.ts` | The tool calls of one real Claude Code session, replayed in order, including the calls Claude Code denied. |
 | `interpreter.test.ts` | What the hub sends to a model and what it accepts back, against a local stand-in for the API. |
 | `persistence.test.ts` | A clean restart, a hard kill, a new engagement and `SPECTRA_RESUME=0`. |
+| `access.test.ts` | Who may talk to the hub: requests and live-feed connections are refused unless both `Host` and `Origin` name this machine, so a page on another site can't read or write the map. |
 | `observer.test.ts` | The fallback that reads Claude Code's session logs, including a subagent's separate log. |
 | `cli.test.ts` | The installed `spectra` command. It builds and packs the package, unpacks the tarball into an empty folder with its own home directory, and runs everything from there: the hub and dashboard, `init` (with a stand-in for Claude Code's CLI), the copied hook and MCP server, the demo and `verify`. |
 

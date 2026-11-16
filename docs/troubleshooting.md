@@ -46,6 +46,8 @@ Each client fails differently:
 
 Fixes: start the hub; make sure `SPECTRA_HUB` and `SPECTRA_PORT` agree; and use `127.0.0.1`, not `localhost`, in `SPECTRA_HUB` — the hub listens on IPv4 loopback only, and `localhost` can resolve to the IPv6 address first.
 
+A reply of **403** `host not allowed` means the request reached the hub under another name, such as this machine's hostname or a name a proxy or tunnel added. The hub answers only to `127.0.0.1`, `localhost` and `[::1]`.
+
 ## Claude Code
 
 ### Hooks aren't firing

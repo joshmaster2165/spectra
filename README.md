@@ -188,7 +188,7 @@ The [reference](docs/reference.md) documents every MCP tool and hub route; [conf
 
 ## Security and privacy
 
-- **Local hub.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins. It makes no outbound connections unless you turn on the Navigator or the Interpreter, which call the Anthropic API. The dashboard also loads its fonts from Google Fonts.
+- **Local hub.** The hub listens on `127.0.0.1` and refuses requests and WebSockets from non-local browser origins, or addressed to any name but this machine's. It makes no outbound connections unless you turn on the Navigator or the Interpreter, which call the Anthropic API. The dashboard also loads its fonts from Google Fonts.
 - **Command output stays local unless you opt in.** The hook forwards the output of shell, fetch and MCP tool calls to your local hub, which reads it in memory and keeps it out of the audit log, apart from a single masked result line kept as evidence for a target read from it. The hub also opens scripts and wordlists inside your scope to read what a command requests; `SPECTRA_READ_FILES=0` turns that off. Output leaves the machine only if you turn on the Interpreter — with credentials, tokens and email addresses masked first, on a best-effort basis.
 - **Model output is checked, not trusted.** Command output is whatever the target sent back. Every target the Interpreter reports must appear in the command or its output and be in scope, and it arrives unmapped and labelled as inference. A planted instruction can at worst add a wrong in-scope candidate.
 - **The Navigator's key stays put.** A key entered in Settings is stored in `~/.spectra/settings.json`, readable only by you, and is never sent back to the browser.

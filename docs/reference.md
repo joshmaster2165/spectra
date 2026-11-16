@@ -123,7 +123,7 @@ Normalized routes keep the first six path segments, replace numeric segments, UU
 
 ## Hub HTTP API
 
-The hub listens on `http://127.0.0.1:4317` (`SPECTRA_PORT`). Every route refuses requests whose `Origin` header isn't `localhost`, `127.0.0.1` or `[::1]` (any port) with **403** `origin not allowed`; requests with no `Origin` — curl, the hook, the MCP server — are allowed. POST bodies are JSON, up to 1,000,000 characters. Methods other than GET and POST get **405**.
+The hub listens on `http://127.0.0.1:4317` (`SPECTRA_PORT`). Every route refuses requests whose `Host` header isn't `localhost`, `127.0.0.1` or `[::1]` (any port) with **403** `host not allowed`, and requests whose `Origin` header isn't one of those with **403** `origin not allowed`; requests with no `Origin` — curl, the hook, the MCP server — are allowed. POST bodies are JSON, up to 1,000,000 characters. Methods other than GET and POST get **405**.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -512,13 +512,13 @@ Without a key it answers `{ "ok": false, "error": "Add an API key first." }` and
 | Status | When |
 |---|---|
 | 400 | The body isn't valid JSON (the response is the parse error), is over the size limit (`body too large`), or fails a route's checks. |
-| 403 | `origin not allowed`. |
+| 403 | `host not allowed` or `origin not allowed`. |
 | 404 | Unknown POST path. |
 | 405 | Any method other than GET or POST. |
 
 ### WS /ws
 
-Connect to `ws://127.0.0.1:4317/ws`. The same origin rule applies. On connect the hub sends a snapshot, then one message per event:
+Connect to `ws://127.0.0.1:4317/ws`. The same host and origin rules apply. On connect the hub sends a snapshot, then one message per event:
 
 ```ts
 { kind: "snapshot", state: GraphState }

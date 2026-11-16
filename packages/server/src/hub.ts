@@ -160,7 +160,7 @@ export class Hub {
       server: this.server,
       path: "/ws",
       // A web page on another origin must not be able to read the agent's activity.
-      verifyClient: ({ origin }: { origin?: string }) => isLocalOrigin(origin),
+      verifyClient: ({ origin, req }: { origin?: string; req: http.IncomingMessage }) => isLocalOrigin(origin) && isLocalHost(req.headers.host),
     });
     this.wss.on("connection", (ws) => send(ws, { kind: "snapshot", state: this.state }));
     if (opts.dataDir) {
@@ -1035,6 +1035,7 @@ export class Hub {
   /* ── HTTP ────────────────────────────────────────────── */
 
   private handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
+    if (!isLocalHost(req.headers.host)) return void res.writeHead(403).end("host not allowed");
     if (!isLocalOrigin(req.headers.origin)) return void res.writeHead(403).end("origin not allowed");
     const url = new URL(req.url ?? "/", "http://localhost");
     const json = (body: unknown) => {
@@ -1123,10 +1124,26 @@ export class Hub {
   }
 }
 
+const LOCAL_NAMES = ["localhost", "127.0.0.1", "[::1]"];
+
+/**
+ * The request must be addressed to this machine by name. A hostile page can point its own domain
+ * at 127.0.0.1 (DNS rebinding); the browser then treats the hub as that page's own site and sends
+ * no foreign Origin on a read, but it still puts the page's domain in Host.
+ */
+function isLocalHost(host?: string) {
+  if (!host || !/^[a-z0-9.\-[\]:]+$/i.test(host)) return false;
+  try {
+    return LOCAL_NAMES.includes(new URL(`http://${host}`).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function isLocalOrigin(origin?: string) {
   if (!origin) return true; // CLI tools (curl, hook script, MCP server) send no Origin
   try {
-    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
+    return LOCAL_NAMES.includes(new URL(origin).hostname);
   } catch {
     return false;
   }
