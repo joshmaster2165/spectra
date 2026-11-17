@@ -107,7 +107,7 @@ The story, in under a minute:
 
 <img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.webp" alt="The recon demo: subdomains, live hosts, API routes, admin paths and JS-bundle routes fill the attack-surface graph; one production request turns red; findings, proxy history and Navigator leads follow" width="100%">
 
-<sub>The recon demo as it runs. A <a href="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.mp4">full-quality MP4</a> is also available.</sub>
+<sub>The recon demo as it runs. A <a href="https://github.com/joshmaster2165/spectra/blob/media/demo.mp4">full-quality MP4</a> is also available.</sub>
 
 ```bash
 npm run demo:recon

@@ -14,7 +14,7 @@
 </p>
 
 <p align="center"><img src="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.webp" alt="Spectra mapping a recon engagement: subdomain enumeration, live-host probing, API routes from an OpenAPI spec, admin content discovery and JS-bundle mining fill the attack-surface graph; one request to production lights up red; findings, proxy history and the Navigator's leads follow" width="100%"></p>
-<p align="center"><sub>A recon engagement against a fictional, authorized target — <code>npm run demo:recon</code> · <a href="https://raw.githubusercontent.com/joshmaster2165/spectra/media/demo.mp4">full-quality MP4</a></sub></p>
+<p align="center"><sub>A recon engagement against a fictional, authorized target — <code>npm run demo:recon</code> · <a href="https://github.com/joshmaster2165/spectra/blob/media/demo.mp4">full-quality MP4</a></sub></p>
 
 ---
 
